@@ -1,13 +1,13 @@
 //! This is main mod. It is simple now
 
-
 #![deny(missing_docs)]
-#![deny(warnings)]
+// #![deny(warnings)]
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
 
 use core::arch::global_asm;
+// use core::arch::asm
 use log::*;
 
 #[macro_use]
@@ -15,11 +15,13 @@ mod console;
 mod lang_items;
 mod logging;
 mod sbi;
+mod mm;
+pub mod config;
 
 #[path = "boards/qemu.rs"]
 mod board;
 
-global_asm!(include_str!("entry.asm"));
+global_asm!(include_str!("entry.S"));
 
 /// clear BSS segment
 pub fn clear_bss() {

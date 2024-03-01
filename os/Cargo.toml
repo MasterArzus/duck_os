@@ -8,5 +8,8 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
+buddy_system_allocator = "0.6"
+bitmap-allocator = {path = "../dependency/bitmap-allocator"}
+
 [profile.release]
 debug = true
