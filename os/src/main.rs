@@ -1,10 +1,11 @@
 //! This is main mod. It is simple now
 
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 // #![deny(warnings)]
 #![no_std]
 #![no_main]
 #![feature(panic_info_message)]
+#![feature(sync_unsafe_cell)]
 
 use core::arch::global_asm;
 // use core::arch::asm
@@ -15,8 +16,13 @@ mod console;
 mod lang_items;
 mod logging;
 mod sbi;
-mod mm;
+pub mod mm;
 pub mod config;
+pub mod utils;
+mod syscall;
+
+extern crate alloc;
+extern crate bitmap_allocator;
 
 #[path = "boards/qemu.rs"]
 mod board;

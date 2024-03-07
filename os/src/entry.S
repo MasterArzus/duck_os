@@ -20,6 +20,7 @@ _start:
     li t1, 0xffffffc000000000
     add sp, sp, t1
     # 4.jump to rust_main
+    # TODO: 为什么这里也需要加上offset??
     la t0, rust_main
     add t0, t0, t1
     jr t0
@@ -39,6 +40,7 @@ boot_stack_top:
     .align 12
 boot_pagetable:
     # two pte
+    # TODO: 为什么是两个pte？下面一个还可以理解，上面这个有什么作用？
     # 0x0000_0000_8000_0000 ---> 0x0000_0000_8000_0000
     # 0xffff_ffc0_8000_0000 ---> 0x0000_0000_8000_0000
     .quad 0

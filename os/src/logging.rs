@@ -1,7 +1,7 @@
 //! 基于外部库log 自定义log输出的内容，详见 fn log()函数
 //！具体的使用方法参考log crate
 
-use log::{self, Level, LevelFilter, Log, Metadata, Record};
+use log::{Level, LevelFilter, Log, Metadata, Record};
 
 /// a simple logger
 struct SimpleLogger;

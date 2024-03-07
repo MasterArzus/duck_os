@@ -19,3 +19,5 @@ easy-fs-fuse/target/*
 tools/
 pushall.sh
 *.bak
+tmp.c
+test.txt

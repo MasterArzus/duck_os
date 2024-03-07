@@ -9,8 +9,12 @@ mod memory_set;
 mod address;
 mod pma;
 mod vma_range;
+pub mod cow;
+/// 
+pub mod type_cast;
 
-
+/// 
 pub fn init_mm() {
-    allocator::heap::init_heap();    
+    allocator::heap::init_heap();
+    allocator::frame::init_frame_allocator();
 }
