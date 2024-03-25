@@ -36,7 +36,8 @@ use super::page_fault::MmapPageFaultHandler;
 pub struct MemeorySet {
     // TODO: areas需不需要加锁？？
     pub areas: VmaRange,
-    // 底下没有数据结构拥有页表，所以不用Arc，另外需要处理多个处理器访问页表的数据竞争问题
+    // 底下没有数据结构拥有页表，所以不用Arc，没有多个所有者
+    // pt的借用关系难以管理，所以使用cell,但是为什么要使用sync? (一般情况下在多线程中传递引用)
     pub pt: SyncUnsafeCell<PageTable>,
     // is_user: bool,
     // pub heap_range

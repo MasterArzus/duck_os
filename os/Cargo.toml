@@ -13,6 +13,8 @@ bitmap-allocator = {path = "../dependency/bitmap-allocator"}
 bitflags = "1.2.1"
 spin = { version = "0.9.8", features = ["mutex"] } 
 riscv = "0.6.0"
+lazy_static = { version = "1.4", features = ["spin_no_std"] }
+hashbrown = "0.14"
 
 [profile.release]
 debug = true

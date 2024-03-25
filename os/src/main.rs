@@ -17,8 +17,11 @@ mod lang_items;
 mod logging;
 mod sbi;
 pub mod mm;
+pub mod fs;
 pub mod config;
+pub mod timer;
 pub mod utils;
+pub mod driver;
 mod syscall;
 
 extern crate alloc;
