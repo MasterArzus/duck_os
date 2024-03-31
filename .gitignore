@@ -20,4 +20,5 @@ tools/
 pushall.sh
 *.bak
 tmp.c
+a.out
 test.txt

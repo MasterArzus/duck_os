@@ -23,6 +23,7 @@ pub mod timer;
 pub mod utils;
 pub mod driver;
 mod syscall;
+pub mod sync;
 
 extern crate alloc;
 extern crate bitmap_allocator;

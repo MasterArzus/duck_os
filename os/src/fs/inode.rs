@@ -24,8 +24,7 @@
         // 4）link：创建硬链接
         5）lookup: 为包含在一个目录项对想的文件名对应的索引节点查找目录
         6）rename：移动文件
-        
-
+    
 */
 
 use core::sync::atomic::AtomicUsize;
