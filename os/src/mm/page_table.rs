@@ -14,7 +14,7 @@
 use core::arch::asm;
 use alloc::vec::Vec;
 use alloc::vec;
-use riscv::register::satp;
+use riscv::register::satp::{self, Satp};
 
 use super::{
     address::{ppn_to_phys, pte_array, vaddr_offset, vaddr_to_pte_vpn, virt_to_vpn, vpn_to_virt, PhysAddr, VirtAddr}, 
@@ -132,10 +132,14 @@ impl PageTable {
 
     /// activate page_table
     pub fn activate(&self) {
-        let satp = self.token();
-        unsafe {
-            satp::write(satp);
-            asm!("sfence.vma");
+        // TODO: 不知道有没有逻辑问题？
+        let old_satp = satp::read().ppn() << 12;
+        if old_satp != self.root_paddr {
+            let satp = self.token();
+            unsafe {
+                satp::write(satp);
+                asm!("sfence.vma");
+            }
         }
     }
 

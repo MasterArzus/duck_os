@@ -12,13 +12,9 @@ user/build
 user/target/*
 user/.idea/*
 user/Cargo.lock
-easy-fs/Cargo.lock
-easy-fs/target/*
-easy-fs-fuse/Cargo.lock
-easy-fs-fuse/target/*
 tools/
 pushall.sh
 *.bak
 tmp.c
 a.out
-test.txt
+*.txt

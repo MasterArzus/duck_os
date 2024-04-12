@@ -17,7 +17,7 @@
         4）同步函数（用在page cache中，暂且不考虑）
 */
 
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc};
 use spin::Mutex;
 
 use crate::config::mm::PAGE_SIZE;
@@ -25,7 +25,6 @@ use crate::config::mm::PAGE_SIZE;
 use super::{
     address::{align_down, byte_array, get_mut, get_ref, phys_to_ppn, ppn_to_phys, virt_to_vpn},
     allocator::frame::{self, alloc_frame, FrameTracker}, 
-    page_table::PageTable,
     type_cast::{PTEFlags, PagePermission, MapPermission}
 };
 
@@ -55,7 +54,7 @@ impl Page {
     }
 
     pub fn new_from_page(ppn: usize, permission: PagePermission) -> Self {
-        let mut new_frame = alloc_frame().unwrap();
+        let new_frame = alloc_frame().unwrap();
         byte_array(ppn_to_phys(new_frame.ppn))
             .copy_from_slice(&byte_array(ppn_to_phys(ppn)));
         Self {

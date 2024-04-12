@@ -7,8 +7,6 @@ use crate::{
 
 use super::{SplitOverlap, UnmapOverlap};
 
-
-
 // #[derive(Debug)]
 pub struct VmaRange {
     pub segments: BTreeMap<usize, VirtMemoryAddr>,

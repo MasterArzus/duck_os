@@ -4,6 +4,6 @@ pub mod file_system;
 mod dentry;
 mod inode;
 mod info;
-
+pub mod fd_table;
 
 pub const AT_FDCWD: isize = -100;

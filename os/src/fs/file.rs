@@ -36,7 +36,7 @@ pub struct FileMetaInner {
     pub f_pos: usize,
 }
 
-pub trait File {
+pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
 
     fn read(&self, buf: &mut [u8], flags: OpenFlags);

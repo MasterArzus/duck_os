@@ -28,14 +28,14 @@
 
 use core::ops::Range;
 
-use crate::utils::cell::SyncUnsafeCell;
+use crate::{config::mm::PAGE_SIZE, utils::cell::SyncUnsafeCell};
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::config::mm::PHY_TO_VIRT_PPN_OFFSET;
 
 use super::{
-    address::{vaddr_offset, virt_to_vpn, VirtAddr}, 
+    address::{align_down, align_up, byte_array, ppn_to_phys, vaddr_offset, virt_to_vpn, VirtAddr}, 
     memory_set::page_fault::PageFaultHandler, 
     page_table::PageTable, 
     pma::{Page,  PhysMemoryAddr}, 
@@ -59,9 +59,10 @@ pub enum MapType {
     Direct,
 }
 
-// TODO: 这里的数据类型是否要加锁等之类的问题还要仔细考虑
-// Direct类型vma：没有page_fault_handler, 没有pma(页帧)
-// 
+/*  TODO: 这里的数据类型是否要加锁等之类的问题还要仔细考虑
+   Direct类型vma：没有page_fault_handler, 没有pma(页帧)
+    Assumption: vaddr的范围头尾值都 页对齐了
+*/ 
 pub struct VirtMemoryAddr {
     // 这里暂时的认为一个物理地址空间只会被最多一个虚拟地址空间所拥有
     // 所以不使用Arc，同时加入更加弱的锁 SyncUnsafeCell
@@ -78,9 +79,10 @@ pub struct VirtMemoryAddr {
 }
 
 impl VirtMemoryAddr {
-    // TODO: 有很多函数其实都默认了addr会对齐页边。如果不对齐会发生什么？？ 
-
-    // 创建一个新的虚拟逻辑段
+    /*
+        Assumption: 根据地址参数构建vma
+        TODO：有很多函数其实都默认了addr会对齐页边。如果不对齐会发生什么？？  
+     */
     pub fn new(
         // 从push中创建一个Vma的时候，不应该让上层去初始化pma这个东西
         // 因为上层不需要关心这个东西
@@ -92,14 +94,13 @@ impl VirtMemoryAddr {
         handler: Option<Arc<dyn PageFaultHandler>>,
     ) -> Self {
         // 先检查输入的地址是否对齐页 TODO: 没想明白，之后解决
-        if (vaddr_offset(start_vaddr) == 0usize) | (vaddr_offset(end_vaddr) == 0usize) {
-            todo!()
-        }
+        // if (vaddr_offset(start_vaddr) == 0usize) | (vaddr_offset(end_vaddr) == 0usize) {
+        //     todo!()
+        // }
         Self {
             pma: SyncUnsafeCell::new(PhysMemoryAddr::new()),
-            start_vaddr,
-            end_vaddr,
-
+            start_vaddr: align_down(start_vaddr),
+            end_vaddr: align_up(end_vaddr),
             map_permission,
             vma_type,
             map_type,
@@ -125,6 +126,7 @@ impl VirtMemoryAddr {
     // 分配物理帧、映射
     // Direct：不用分配物理帧，pma保持为空
     // Frame: 分配物理帧
+    // function: 完成page table映射，并修改pma中的page
     pub fn map_one(&self, pt: &mut PageTable, vpn: usize, page: Option<Arc<Page>>) -> usize {
         let pma = self.pma.get_unchecked_mut();
         let ppn: usize;
@@ -182,6 +184,32 @@ impl VirtMemoryAddr {
         let start_vpn = virt_to_vpn(self.start_vaddr);
         let end_vpn = virt_to_vpn(self.end_vaddr);
         start_vpn..end_vpn
+    }
+
+    // Function: 向物理页帧中写入数据
+    // TODO: 这里可以直接找物理地址空间中的页，而不是去找页表！
+    pub fn copy_data(&self, data: &[u8], offset: usize, pt: &mut PageTable) {
+        let mut start = 0usize;
+        let mut offset = offset;
+        let mut current_va = self.start_vaddr;
+        let max_len = data.len();
+        loop {
+            let src = &data[start..max_len.min(start + PAGE_SIZE - offset)];
+            let dst = &mut byte_array(
+                ppn_to_phys(pt
+                    .find_pte(current_va)
+                    .unwrap()
+                    .ppn())
+            )[offset..PAGE_SIZE - offset];
+            dst.fill(0);
+            dst.copy_from_slice(src);
+            start += PAGE_SIZE - offset;
+            if start >= max_len {
+                break;
+            }
+            offset = 0;
+            current_va += PAGE_SIZE;
+        }
     }
 }
 

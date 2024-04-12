@@ -22,16 +22,14 @@
         还有一些莫名奇妙的函数，反正先不管吧，那些函数也是需要去看大量代码才能理解的，先实现一些通用的功能。
 */
 
-use alloc::sync::Arc;
 use log::info;
 use riscv::register::scause::Scause;
 
 use crate::{
-    config::mm::MEMORY_END, 
-    mm::{cow::CowManager, page_table::PageTable, pma::PhysMemoryAddr, type_cast::{MapPermission, PTEFlags}, vma::{MapType, VirtMemoryAddr, VmaType}, vma_range::vma_range::VmaRange}, utils::cell::SyncUnsafeCell,
+    config::mm::{LOW_LIMIT, MEMORY_END, USER_UPPER_LIMIT}, 
+    mm::{cow::CowManager, page_table::PageTable, type_cast::{MapPermission, PTEFlags}, vma::{MapType, VirtMemoryAddr, VmaType}, vma_range::vma_range::VmaRange}, utils::cell::SyncUnsafeCell,
 };
 
-use super::page_fault::MmapPageFaultHandler;
 
 pub struct MemeorySet {
     // TODO: areas需不需要加锁？？
@@ -54,6 +52,10 @@ pub fn init_kernel_space() {
     }
 }
 
+pub fn kernel_space_activate() {
+    unsafe { KERNEL_SPACE.as_ref().map(MemeorySet::activate); }
+}
+
 extern "C" {
     fn stext();
     fn etext();
@@ -66,9 +68,11 @@ extern "C" {
     fn ekernel();
 }
 
-
 impl MemeorySet {
-    // 现在仅考虑了最基本的 sections部分，还有trampoline等之类的还没有考虑
+    /*
+        function: 完成内核地址空间的初始化
+        TODO: 还没有考虑其他的sections，例如Trampoline
+     */
     pub fn new_kernel() -> Self {
         let mut kernel_memory_set = MemeorySet {
             areas: VmaRange::new(), 
@@ -98,63 +102,75 @@ impl MemeorySet {
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
-                (stext as usize), 
-                (etext as usize), 
+                stext as usize, 
+                etext as usize, 
                 MapPermission::R | MapPermission::X, 
                 MapType::Direct, 
                 VmaType::Elf,
                 None
-            )
+            ),
+            None,
+            0
         );
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
-                (srodata as usize), 
-                (erodata as usize), 
+                srodata as usize, 
+                erodata as usize, 
                 MapPermission::R, 
                 MapType::Direct, 
                 VmaType::Elf,
                 None
-            )
+            ),
+            None,
+            0
         );
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
-                (sdata as usize), 
-                (edata as usize), 
+                sdata as usize,
+                edata as usize, 
                 MapPermission::R | MapPermission::W, 
                 MapType::Direct, 
                 VmaType::Elf,
                 None
-            )
+            ),
+            None,
+            0
         );
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
-                (sbss as usize), 
-                (ebss as usize), 
+                sbss as usize, 
+                ebss as usize, 
                 MapPermission::R | MapPermission::W, 
                 MapType::Direct, 
                 VmaType::Elf,
                 None
-            )
+            ),
+            None,
+            0
         );
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
-                (ekernel as usize), 
-                (MEMORY_END as usize), 
+                ekernel as usize, 
+                MEMORY_END as usize, 
                 MapPermission::R | MapPermission::W, 
                 MapType::Direct, 
                 VmaType::PhysFrame,
                 None
-            )
+            ),
+            None,
+            0
         );
         info!("[kernel] Initail kernel finished!");
         kernel_memory_set
     }
 
-    // 用户空间的页表需要做好映射
+    /* Function: 创建一个用户的虚拟地址空间，并包含了内核的地址空间
+       Assumption：内核的地址空间不需要加入其中，只需要做好page_table的映射即可
+     */
     pub fn new_user() -> Self {
         // 从内核中的页表里映射好了相关的数据
         let pt = SyncUnsafeCell::new(PageTable::new_user());
@@ -217,15 +233,19 @@ impl MemeorySet {
         })
     }
 
-    // 为 vma（分配物理页 + 做映射 + 插入memory_set）
-    // TODO：是否需要传递含数据的物理页
-    pub fn push(&mut self, vm_area: VirtMemoryAddr) {
+    /* Function: 为 vma（分配物理页 + 做映射 + 插入memory_set) 
+                 如果有数据需要写入物理页，则先分配，再写入
+    */ 
+    pub fn push(&mut self, vm_area: VirtMemoryAddr, data: Option<&[u8]>, offset: usize) {
         vm_area.map_all(self.pt.get_unchecked_mut());
+        if data.is_some() {
+            vm_area.copy_data(&data.unwrap(), offset, self.pt.get_unchecked_mut());
+        }
         self.areas.insert_raw(vm_area);
     }
 
     // 懒分配，为 vma (插入memory_set)
-    pub fn push_lazy(&mut self, vm_area: VirtMemoryAddr) {
+    pub fn push_no_map(&mut self, vm_area: VirtMemoryAddr) {
         self.areas.insert_raw(vm_area);
     }
 
@@ -318,9 +338,15 @@ impl MemeorySet {
                         todo!()
                     }
                 }
-            ms.push_lazy(new_vma);
+            ms.push_no_map(new_vma);
         }
         ms
+    }
+
+    /* Function: 清理用户地址空间中的数据
+     */
+    pub fn clear_user_space(&mut self) {
+        self.areas.unmap(LOW_LIMIT, USER_UPPER_LIMIT, self.pt.get_mut())
     }
 
 }

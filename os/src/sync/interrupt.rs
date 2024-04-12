@@ -2,6 +2,8 @@ use core::cell::{RefCell, RefMut};
 
 use riscv::register::sstatus;
 
+use crate::config::task::MAX_CORE_NUM;
+
 fn cpu_id() -> u8 {
     let mut cpu_id;
     unsafe {
@@ -40,8 +42,6 @@ impl<T> SafeRefCell<T> {
 // Avoid hard code
 #[allow(clippy::declare_interior_mutable_const)]
 const DEFAULT_CPU: SafeRefCell<Cpu> = SafeRefCell::new(Cpu::new());
-
-const MAX_CORE_NUM: usize = 16;
 
 static CPUS: [SafeRefCell<Cpu>; MAX_CORE_NUM] = [DEFAULT_CPU; MAX_CORE_NUM];
 

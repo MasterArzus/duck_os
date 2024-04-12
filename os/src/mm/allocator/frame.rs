@@ -29,6 +29,7 @@ use crate::{config::mm::MEMORY_END, mm::address::{byte_array, phys_to_ppn, phys_
 // 如果再小一点，只有4G的选项可以选择，这又有点小
 type FrameAllocatorImpl = bitmap_allocator::BitAlloc16M;
 
+// 一个frame实际上就是一个页的大小
 pub struct FrameTracker {
     pub ppn: usize,
 }
@@ -104,7 +105,7 @@ pub fn alloc_frame() -> Option<FrameTracker> {
         .map(FrameTracker::new)
 }
 
-pub fn alloc_contiguous_frame(num: usize) -> Vec<FrameTracker> {
+pub fn alloc_contiguous_frame(num: usize) -> Option<Vec<FrameTracker>> {
     let mut frames: Vec<FrameTracker> = Vec::new();
     FRAME_ALLOCATOR
         .lock()
@@ -114,7 +115,7 @@ pub fn alloc_contiguous_frame(num: usize) -> Vec<FrameTracker> {
                 frames.push(FrameTracker::new(ppn))
             }
         });
-    frames
+    Some(frames)
 }
 
 pub fn dealloc_frame(ppn: usize) {

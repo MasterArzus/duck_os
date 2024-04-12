@@ -18,3 +18,6 @@ pub const ROOT_CLUSTER_NUM: usize = 2;
 
 // 一个扇区能存放Dirdentry的最大个数
 pub const MAX_DIRENT_PER_SECTOR: usize = 16;
+
+// 最大的Fd数
+pub const MAX_FD: usize = 512;

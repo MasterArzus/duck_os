@@ -8,10 +8,10 @@
         4)  user_heap
 */
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use riscv::register::scause::Scause;
 
-use crate::mm::{address::{byte_array, ppn_to_phys, virt_to_vpn, VirtAddr}, allocator::frame::alloc_frame, page_table::PageTable, pma::Page, type_cast::{PTEFlags, PagePermission}, vma::VirtMemoryAddr};
+use crate::mm::{address::{virt_to_vpn, VirtAddr}, page_table::PageTable, pma::Page, type_cast::{PTEFlags, PagePermission}, vma::VirtMemoryAddr};
 
 use super::mem_set::MemeorySet;
 

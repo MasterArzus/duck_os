@@ -31,7 +31,16 @@ pub const SV39_VPN_3: usize = 30;
 pub const MEMORY_END: usize = 0x8800_0000 + PHY_TO_VIRT_OFFSET;
 
 /// LOW_LIMIT mmap函数中使用的
-pub const LOW_LIMIT: usize = 0x1000;
+pub const LOW_LIMIT: usize = 0x0;
 
 /// UPPER_LIMIT mmap函数中使用的
 pub const UPPER_LIMIT: usize = 0xffff_ffff_ffff_ffff;
+
+/// 用户地址空间的最高地址 ——> 用户地址空间有 4G 
+pub const USER_UPPER_LIMIT: usize = 0xffff_ffff;
+
+/// 用户栈大小 8Mb
+pub const USER_STACK_SIZE: usize = 0x800000; 
+
+/// 用户栈的初始栈顶和栈底 （用户地址空间的倒数第二页）
+pub const USER_STACK_BOTTOM: usize = 0xFFFF_F000;
