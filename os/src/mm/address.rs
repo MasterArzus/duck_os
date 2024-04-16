@@ -89,7 +89,7 @@ pub fn pte_array(paddr: PhysAddr) -> &'static mut [PageTableEntry] {
 /// 从物理地址 解引用获得byte array
 pub fn byte_array(paddr: PhysAddr) -> &'static mut [u8] {
     unsafe {
-        core::slice::from_raw_parts_mut(paddr as *mut u8, 4096)
+        core::slice::from_raw_parts_mut(paddr as *mut u8, PAGE_SIZE)
     }
 }
 

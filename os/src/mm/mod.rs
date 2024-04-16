@@ -7,7 +7,7 @@ pub mod vma;
 pub mod allocator;
 pub mod memory_set;
 pub mod address;
-mod pma;
+pub mod pma;
 mod vma_range;
 pub mod cow;
 /// 

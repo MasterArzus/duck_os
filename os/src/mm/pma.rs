@@ -17,10 +17,10 @@
         4）同步函数（用在page cache中，暂且不考虑）
 */
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::{Arc, Weak}};
 use spin::Mutex;
 
-use crate::config::mm::PAGE_SIZE;
+use crate::{config::{fs::SECTOR_SIZE, mm::PAGE_SIZE}, fs::inode::Inode};
 
 use super::{
     address::{align_down, byte_array, get_mut, get_ref, phys_to_ppn, ppn_to_phys, virt_to_vpn},
@@ -28,8 +28,33 @@ use super::{
     type_cast::{PTEFlags, PagePermission, MapPermission}
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DataState {
+    Init,
+    Sync,
+    Dirty,
+}
 
-pub struct FileInfo {
+const DATA_SIZE: usize = PAGE_SIZE / SECTOR_SIZE;
+
+pub struct DiskFileInfo {
+    inode: Weak<dyn Inode>,
+    file_offset: usize,
+    data_state: [DataState; DATA_SIZE],
+}
+
+impl DiskFileInfo {
+    pub fn new(inode: Weak<dyn Inode>, f_offset: usize) -> Self {
+        Self {
+            inode,
+            file_offset: f_offset,
+            data_state: [DataState::Init; DATA_SIZE],
+        }
+    }
+
+    pub fn change_data_state(&mut self, state: DataState, idx: usize) {
+        self.data_state[idx] = state;
+    }
 
 }
 
@@ -37,7 +62,7 @@ pub struct FileInfo {
 pub struct Page {
     pub frame: FrameTracker,
     pub permission: PagePermission,
-    pub file_info: Option<Mutex<FileInfo>>,
+    pub disk_file: Option<Mutex<DiskFileInfo>>,
 }
 
 impl Page {
@@ -49,7 +74,15 @@ impl Page {
         Self{
             frame: alloc_frame().unwrap(),
             permission: per,
-            file_info: None,
+            disk_file: None,
+        }
+    }
+
+    pub fn new_disk_page(per: PagePermission, inode: Weak<dyn Inode>, offset: usize) -> Self {
+        Self {
+            frame: alloc_frame().unwrap(),
+            permission: per,
+            disk_file: Some(Mutex::new(DiskFileInfo::new(inode, offset))),
         }
     }
 
@@ -60,12 +93,9 @@ impl Page {
         Self {
             frame: new_frame,
             permission,
-            file_info: None,
+            disk_file: None,
         }
     }
-    
-    // 剩下的都是关于Frame的拓展函数 关于file_info现在不用处理
-    // 函数：暂时不考虑file_info的情况下，就是提供读写的接口
     
     pub fn get_ref_from_page<T>(&self) -> &'static T {
         get_ref(ppn_to_phys(self.frame.ppn))
@@ -76,18 +106,52 @@ impl Page {
     }
 
     pub fn page_byte_array(&self) -> &'static mut [u8] {
-        unsafe {
-            byte_array(phys_to_ppn(self.frame.ppn))
+        byte_array(phys_to_ppn(self.frame.ppn))
+    }
+
+    fn to_sec_idx(page_offset: usize) -> usize {
+        page_offset / PAGE_SIZE 
+    }
+    // 一个页面的读写
+    // page_offset: 为页面中的offset值
+    pub fn read(&self, page_offset: usize, buf: &mut [u8]) {
+        if page_offset > PAGE_SIZE {
+            panic!()
         }
+        let len: usize = buf.len().min(PAGE_SIZE - page_offset);
+        for idx in Self::to_sec_idx(page_offset)..DATA_SIZE {
+            let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
+            if disk_file_lock.data_state[idx] == DataState::Init {
+                disk_file_lock.inode.upgrade().unwrap().read(
+                    disk_file_lock.file_offset + idx * SECTOR_SIZE,
+                    &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
+                );
+                disk_file_lock.change_data_state(DataState::Sync, idx);
+            }
+            drop(disk_file_lock);
+        }
+        buf.copy_from_slice(&self.page_byte_array()[page_offset..page_offset+len]);
     }
 
-    /// 这个和文件有关系 暂时不用考虑
-    pub fn read() {
-
-    }
-    /// 这个和文件有关系 暂时不用考虑
-    pub fn write() {
-
+    pub fn write(&self, page_offset: usize, buf: &mut [u8]) {
+        if page_offset > PAGE_SIZE {
+            panic!()
+        }
+        let len: usize = buf.len().min(PAGE_SIZE - page_offset);
+        let start = page_offset;
+        let end = page_offset + len;
+        for idx in Self::to_sec_idx(page_offset)..DATA_SIZE {
+            let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
+            if disk_file_lock.data_state[idx] == DataState::Init {
+                disk_file_lock.inode.upgrade().unwrap().read(
+                    disk_file_lock.file_offset + idx * SECTOR_SIZE,
+                    &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
+                );
+                disk_file_lock.change_data_state(DataState::Dirty, idx);
+            }
+        }
+        // TODO: 小心copy_from_slice这个函数，不会检查两个切片的大小，我这里没有检查，区间可能会爆掉！
+        self.page_byte_array()[start..end].copy_from_slice(buf);
     }
 }
 

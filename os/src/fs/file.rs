@@ -22,17 +22,19 @@
 use alloc::sync::Arc;
 use spin::mutex::Mutex;
 
-use super::{dentry::Dentry, info::{FileMode, OpenFlags}};
+use super::{dentry::Dentry, info::{FileMode, OpenFlags}, inode::Inode, page_cache::PageCache};
 
 
 pub struct FileMeta {
     pub f_mode: FileMode,
+    pub page_cache: Option<Arc<PageCache>>,
+    pub f_dentry: Arc<dyn Dentry>,
+    pub f_inode: Arc<dyn Inode>,
     pub inner: Mutex<FileMetaInner>,
     // pub file: Option<Weak<dyn File>>
 }
 
 pub struct FileMetaInner {
-    pub f_dentry: Arc<dyn Dentry>,
     pub f_pos: usize,
 }
 
@@ -42,4 +44,13 @@ pub trait File: Send + Sync {
     fn read(&self, buf: &mut [u8], flags: OpenFlags);
     fn write(&self, buf: &[u8], flags: OpenFlags);
 
+    fn trucate(&self, size: usize);
+    fn seek(&self, seek: SeekFrom);
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SeekFrom {
+    Start(usize),
+    Current(usize),
+    End(usize),
 }
