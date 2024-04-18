@@ -1,13 +1,12 @@
 //! fat32文件系统对 VFS File System 的具体实现
 
 use alloc::{string::ToString, sync::Arc};
-use spin::mutex::Mutex;
 
-use crate::{config::fs::{BOOT_SECTOR_ID, FSINFO_SECTOR_ID, SECTOR_SIZE}, driver::BlockDevice, fs::{dentry::Dentry, file_system::{FSFlags, FSType, FileSystem, FileSystemMeta}, inode::Inode}};
+use crate::{config::fs::{BOOT_SECTOR_ID, SECTOR_SIZE}, driver::BlockDevice, fs::{dentry::Dentry, file_system::{FSFlags, FSType, FileSystem, FileSystemMeta}, inode::Inode}, sync::SpinLock};
 
-use super::{bpb::load_bpb, fat::FatInfo, fat_dentry::FatDentry, fat_inode::FatInode, fsinfo::{load_fsinfo, FSInfo}, utility::{fat_sector, init_map}};
+use super::{bpb::load_bpb, fat::FatInfo, fat_dentry::FatDentry, fat_inode::FatInode, fsinfo::FSInfo, utility::{fat_sector, init_map}};
 
-
+/// fat中的文件系统
 pub struct Fat32FileSystem {
     pub meta: FileSystemMeta,
 }
@@ -22,6 +21,13 @@ impl FileSystem for Fat32FileSystem {
     }
 }
 
+// TODO: 处理缓冲区的sync问题
+impl Drop for Fat32FileSystem {
+    fn drop(&mut self) {
+        
+    }
+}
+
 impl Fat32FileSystem {
     // 初始化文件系统
     pub fn new(
@@ -30,7 +36,7 @@ impl Fat32FileSystem {
         dev: Arc<dyn BlockDevice>,
         flags: FSFlags,
     ) -> Self {
-        // 1. 读 bpb
+        // 1. 读 bpb —— 从disk到block cache,同时检查bpb
         let mut boot_sec_data: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
         // 这个数据只需要读一次即可，所以不需要使用cache
         dev.read_block(BOOT_SECTOR_ID, &mut boot_sec_data[..]);
@@ -39,12 +45,21 @@ impl Fat32FileSystem {
         if !bpb.is_valid() {
             todo!();
         };
-        // 2. 读 fsinfo
-        let mut fsinfo_sec_data: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
-        // TODO：这个部分的代码要修改，应该使用缓存方式的读写，因为这个数据会被修改
-        dev.read_block(FSINFO_SECTOR_ID, &mut fsinfo_sec_data[..]);
-        let fsinfo = load_fsinfo(map.clone(), fsinfo_sec_data);
-        FSINFO.lock().from_another(fsinfo);
+        // 2. 读 fsinfo，从disk到block，系统结束时回写，期间所有的修改保存在FSINFO中
+        
+        // let mut fsinfo_sec_data: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+        // // TODO：这个部分的代码要修改，应该使用缓存方式的读写，因为这个数据会被修改
+        // // dev.read_block(FSINFO_SECTOR_ID, &mut fsinfo_sec_data[..]);
+        // get_block_cache(FSINFO_SECTOR_ID, Arc::clone(&dev))
+        //     .lock()
+        //     .read(0, |data: &[u8; SECTOR_SIZE]|{
+        //         fsinfo_sec_data.copy_from_slice(data);
+        //     });
+        // let fsinfo = load_fsinfo(map.clone(), fsinfo_sec_data);
+        // FSINFO.lock().from_another(fsinfo);
+        let fsinfo_sec_id = bpb.BPB_FSInfo as usize;
+        FSINFO.lock().init(Arc::clone(&map), Arc::clone(&dev), fsinfo_sec_id);
+
         // 3. 读 fat
         let fat_info = Arc::new(FatInfo::init(
             fat_sector(&bpb), 
@@ -55,14 +70,12 @@ impl Fat32FileSystem {
             Some(dev.clone()))
         );
         // 4. 读data块的位置，构建root_dentry和root_inode
-        // let data_start =  data_sector(&bpb);
         let root_inode = FatInode::new_from_root(fat_info.clone());
         let r_inode: Arc<dyn Inode> = Arc::new(root_inode);
         let root_dentry = FatDentry::new_from_root(fat_info.clone(), mount_point, Arc::clone(&r_inode));
         root_dentry.meta.inner.lock().d_inode = Arc::clone(&r_inode);
         let r_dentry: Arc<dyn Dentry> = Arc::new(root_dentry);
-        // root_dentry.metadata().inner.lock().d_inode = Some(root_inode.clone());
-        // // 5. 让root_dentry 加载所有的子结点
+        // 5. 让root_dentry 加载所有的子结点
         r_dentry.load_all_child(Arc::clone(&r_dentry));
         Self {
             meta: FileSystemMeta {
@@ -76,4 +89,5 @@ impl Fat32FileSystem {
     }
 }
 
-pub static FSINFO: Mutex<FSInfo> = Mutex::new(FSInfo::empty());
+// 多个进程可能同时使用FSINFO,所以要上锁。同时FSINFO实现了RAII
+pub static FSINFO: SpinLock<FSInfo> = SpinLock::new(FSInfo::empty());

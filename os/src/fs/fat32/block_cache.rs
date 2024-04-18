@@ -3,7 +3,6 @@
 use alloc::{
     collections::VecDeque, sync::Arc, vec::Vec, vec,
 };
-use lazy_static::lazy_static;
 use spin::mutex::Mutex;
 
 use crate::{config::fs::{SECTOR_CACHE_SIZE, SECTOR_SIZE}, driver::BlockDevice};
@@ -78,18 +77,21 @@ impl Drop for BlockCache {
 
 /// BlockCacheManager is a manager for BlockCache.
 pub struct BlockCacheManager {
-    /// (block_id, block_cache)
-    queue: VecDeque<(usize, Arc<Mutex<BlockCache>>)>,
+    /// (block_id, block_cache, flag)
+    queue: VecDeque<(usize, Arc<Mutex<BlockCache>>, usize)>,
+    clock: usize,
 }
 
 impl BlockCacheManager {
     /// Create a new BlockCacheManager with an empty queue (block_id, block_cache)
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             queue: VecDeque::new(),
+            clock: 0,
         }
     }
     /// Get a block cache from the queue. according to the block_id.
+    /// clock frame algorithm
     pub fn get_block_cache(
         &mut self,
         block_id: usize,
@@ -98,36 +100,38 @@ impl BlockCacheManager {
         if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
             Arc::clone(&pair.1)
         } else {
-            // substitute
-            if self.queue.len() == SECTOR_CACHE_SIZE {
-                // from front to tail
-                if let Some((idx, _)) = self
-                    .queue
-                    .iter()
-                    .enumerate()
-                    .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
-                {
-                    self.queue.drain(idx..=idx);
-                } else {
-                    panic!("Run out of BlockCache!");
-                }
-            }
-            // load block into mem and push back
             let block_cache = Arc::new(Mutex::new(BlockCache::new(
                 block_id,
                 Arc::clone(&block_device),
             )));
-            self.queue.push_back((block_id, Arc::clone(&block_cache)));
+            if self.queue.len() == SECTOR_CACHE_SIZE {
+                loop {
+                    if Arc::strong_count(&self.queue[self.clock].1) == 1 {
+                        if self.queue[self.clock].2 == 1 {
+                            self.queue[self.clock].2 = 0;
+                            self.clock = (self.clock + 1) % SECTOR_CACHE_SIZE;
+                            continue;
+                        } else {
+                            self.queue.drain(self.clock..=self.clock);
+                            break;
+                        }
+                    } else {
+                        self.clock = (self.clock + 1) % SECTOR_CACHE_SIZE;
+                    }
+                }
+                self.queue[self.clock] = (block_id, Arc::clone(&block_cache), 1);
+                self.clock = (self.clock + 1) % SECTOR_CACHE_SIZE;
+            } else {
+                self.queue.push_back((block_id, Arc::clone(&block_cache), 1));
+            }
             block_cache
         }
     }
 }
 
-lazy_static! {
-    /// BLOCK_CACHE_MANAGER: Glocal instance of BlockCacheManager.
-    pub static ref BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> =
-        Mutex::new(BlockCacheManager::new());
-}
+pub static BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> = 
+    Mutex::new(BlockCacheManager::new());
+
 /// Get a block cache from the queue. according to the block_id.
 pub fn get_block_cache(
     block_id: usize,
@@ -140,7 +144,7 @@ pub fn get_block_cache(
 /// Sync(write) all the block cache to disk.
 pub fn block_cache_sync_all() {
     let manager = BLOCK_CACHE_MANAGER.lock();
-    for (_, cache) in manager.queue.iter() {
+    for (_, cache,_) in manager.queue.iter() {
         cache.lock().sync();
     }
 }

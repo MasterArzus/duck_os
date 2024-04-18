@@ -32,7 +32,8 @@ impl FatEntry {
     pub fn next_cluster(&self) -> Option<usize> {
         let next_cluster = match self.status() {
             FatEntryStatus::Next(next) => Some(next),
-            _ => None,
+            FatEntryStatus::EndOfFile => None,
+            _ => panic!("Invalid status"),
         };
         next_cluster
     }
@@ -66,8 +67,9 @@ pub fn free_cluster(id: usize, prev_id: Option<usize>, fat_info: Arc<FatInfo>) {
         let (sector_id, offset) = entry_pos(fat_info.clone(), p_id);
             get_block_cache(sector_id, Arc::clone(&fat_info.dev.as_ref().unwrap()))
             .lock()
-            .read(offset, |fat_dentry: &FatEntry|{
+            .write(offset, |fat_dentry: &mut FatEntry|{
                 assert!(fat_dentry.value == id as u32);
+                fat_dentry.value = 0xFFFF_FFFF;
         });
     }
     FSINFO.lock().free_cluster();
@@ -75,6 +77,7 @@ pub fn free_cluster(id: usize, prev_id: Option<usize>, fat_info: Arc<FatInfo>) {
     get_block_cache(sector_id, Arc::clone(&fat_info.dev.as_ref().unwrap()))
         .lock()
         .write(offset, |fat_dentry: &mut FatEntry|{
+            assert!(fat_dentry.value == 0xFFFF_FFFF as u32);
             fat_dentry.value = 0x0;
         });
 }
@@ -83,7 +86,7 @@ pub fn free_cluster(id: usize, prev_id: Option<usize>, fat_info: Arc<FatInfo>) {
 pub fn find_all_cluster(fat_info: Arc<FatInfo>, cluster: usize) -> Vec<usize> {
     let mut clusters: Vec<usize> = Vec::new();
     clusters.push(cluster);
-    let dev = Arc::clone(fat_info.dev.as_ref().expect("No Device"));
+    let dev = Arc::clone(fat_info.dev.as_ref().unwrap());
     let (mut sec, mut offst) = cluster_to_entry(fat_info.clone(), cluster);
     loop {
         let nxt = get_block_cache(sec, dev.clone())

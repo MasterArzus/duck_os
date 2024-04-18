@@ -4,12 +4,12 @@ use alloc::{string::{String, ToString}, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use spin::mutex::Mutex;
 
-use crate::fs::{dentry::{DentryMeta, DentryMetaInner}, info::TimeSpec, inode::Inode};
+use crate::{fs::{dentry::{DentryMeta, DentryMetaInner}, info::TimeSpec, inode::Inode}, sync::SpinLock};
 
 use super::{
     fat::FatInfo, 
     fat_dentry::{FatDentry, Position}, 
-    fat_inode::FatInode, 
+    fat_inode::{FatInode, NxtFreePos}, 
     utility::{fat_to_unix_time, unix_time_to_timespec}, 
     DirEntryStatus
 };
@@ -124,6 +124,7 @@ pub struct ShortDirEntry {
 
 impl ShortDirEntry {
     // TODO：会不会太简单了？
+    // DONE: 好像是有用的！
     pub fn bit_to_name(&self) -> String {
         let mut name = String::new();
         for &b in self.name.iter() {
@@ -149,6 +150,7 @@ impl ShortDirEntry {
     }
 }
 
+// Warning: 函数不知道是否可以正常工作！
 pub fn change_to_short_dentry(entry: &DirEntry) -> ShortDirEntry {
     let mut s_entry = ShortDirEntry::default();
     unsafe {
@@ -175,7 +177,7 @@ pub fn parse_s_name(dir_pos: &(DirEntry, Position), fat_info: Arc<FatInfo>) -> F
 
     FatDentry {
         meta: DentryMeta { 
-            inner: Mutex::new(
+            inner: SpinLock::new(
                 DentryMetaInner {
                     d_name: dname,
                     d_path: "".to_string(),
@@ -192,6 +194,7 @@ pub fn parse_s_name(dir_pos: &(DirEntry, Position), fat_info: Arc<FatInfo>) -> F
 
 // 做法和短名其实很相似，就是名字处理不一样
 // TODO：不知道上面这段话的理解有没有什么问题？？
+// Done：读的话，就是从数据中得到我想要的名字和属性，其他的字节不管了！
 pub fn parse_l_name(dir_pos: &[(DirEntry, Position)], fat_info: Arc<FatInfo>) -> FatDentry {
     let s_dir_pos = &dir_pos[dir_pos.len() - 1];
     let short_entry = change_to_short_dentry(&s_dir_pos.0);
@@ -213,7 +216,7 @@ pub fn parse_l_name(dir_pos: &[(DirEntry, Position)], fat_info: Arc<FatInfo>) ->
 
     FatDentry {
         meta: DentryMeta { 
-            inner: Mutex::new(
+            inner: SpinLock::new(
                 DentryMetaInner {
                     d_name: dname,
                     d_path: "".to_string(),

@@ -24,8 +24,8 @@ use crate::{config::{fs::SECTOR_SIZE, mm::PAGE_SIZE}, fs::inode::Inode};
 
 use super::{
     address::{align_down, byte_array, get_mut, get_ref, phys_to_ppn, ppn_to_phys, virt_to_vpn},
-    allocator::frame::{self, alloc_frame, FrameTracker}, 
-    type_cast::{PTEFlags, PagePermission, MapPermission}
+    allocator::frame::{alloc_frame, FrameTracker}, 
+    type_cast::PagePermission,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,10 +55,8 @@ impl DiskFileInfo {
     pub fn change_data_state(&mut self, state: DataState, idx: usize) {
         self.data_state[idx] = state;
     }
-
 }
 
-/// 
 pub struct Page {
     pub frame: FrameTracker,
     pub permission: PagePermission,
@@ -133,7 +131,7 @@ impl Page {
         buf.copy_from_slice(&self.page_byte_array()[page_offset..page_offset+len]);
     }
 
-    pub fn write(&self, page_offset: usize, buf: &mut [u8]) {
+    pub fn write(&self, page_offset: usize, buf: &[u8]) {
         if page_offset > PAGE_SIZE {
             panic!()
         }
@@ -152,6 +150,10 @@ impl Page {
         }
         // TODO: 小心copy_from_slice这个函数，不会检查两个切片的大小，我这里没有检查，区间可能会爆掉！
         self.page_byte_array()[start..end].copy_from_slice(buf);
+    }
+
+    pub fn sync() {
+
     }
 }
 
@@ -210,7 +212,7 @@ impl PhysMemoryAddr {
 
     // 返回右边剩下的, 删除中间的，留下左边的。
     // 这里的绝对地址也需要再次修改！
-    pub fn split(&mut self, left_end: usize, right_start: usize, start: usize, end: usize) -> Self {
+    pub fn split(&mut self, left_end: usize, right_start: usize, _start: usize, end: usize) -> Self {
         let mut right_page_manager:BTreeMap<usize, Arc<Page>> = BTreeMap::new();
         for vpn in virt_to_vpn(right_start)..virt_to_vpn(end) {
             right_page_manager.insert(vpn, self.page_manager.remove(&vpn).unwrap()); 

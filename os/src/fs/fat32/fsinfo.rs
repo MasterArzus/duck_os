@@ -1,9 +1,13 @@
 //! File System Information(FSInfo) Structure
 
 use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use spin::mutex::Mutex;
+
+use crate::{config::fs:: SECTOR_SIZE, driver::BlockDevice};
+
+use super::block_cache::{get_block_cache, BlockCache};
 
 #[allow(non_snake_case)]
-#[derive(Clone, Copy, Default)]
 // 有两个数据不记录，因为为0. 没什么用
 pub struct FSInfo {
     pub FSI_LeadSig: u32,
@@ -11,6 +15,7 @@ pub struct FSInfo {
     pub FSI_Free_Count: u32,
     pub FSI_Nxt_Free: u32,
     pub FSI_TrailSig: u32,
+    pub block_cache: Option<Arc<Mutex<BlockCache>>>,
 }
 
 impl FSInfo {
@@ -20,16 +25,50 @@ impl FSInfo {
             FSI_StrucSig: 0, 
             FSI_Free_Count: 0, 
             FSI_Nxt_Free: 0, 
-            FSI_TrailSig: 0 
+            FSI_TrailSig: 0,
+            block_cache: None,
         }
     }
 
-    pub fn from_another(&mut self, an: Self) {
-        self.FSI_LeadSig = an.FSI_LeadSig;
-        self.FSI_StrucSig = an.FSI_StrucSig;
-        self.FSI_Free_Count = an.FSI_Free_Count;
-        self.FSI_Nxt_Free = an.FSI_Nxt_Free;
-        self.FSI_TrailSig = an.FSI_TrailSig;
+    /* Function：根据map中的规定，初始化FSINFO
+       Warning: 其中的load_fn函数没有经过测试，潜在风险很大！
+     */
+    pub fn init(&mut self, map: Arc<BTreeMap<String, (usize, usize)>>, dev: Arc<dyn BlockDevice>, sector_id: usize) {
+        self.block_cache = Some(get_block_cache(sector_id, dev));
+        let mut fsinfo_sec_data:[u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+        self.block_cache
+            .as_ref()
+            .unwrap()
+            .lock()
+            .read(0, |data: &[u8; SECTOR_SIZE]|{
+                fsinfo_sec_data.copy_from_slice(data);
+            });
+            
+            macro_rules! load {
+                ($a: expr, $b: expr) => {
+                    if let Some((offset, size)) = map.get($b) {
+                        Self::load_fn(&mut $a, &fsinfo_sec_data, *offset, *size);
+                    }
+                };
+            }
+
+            load!(self.FSI_LeadSig, "FSI_LeadSig");
+            load!(self.FSI_StrucSig, "FSI_StrucSig");
+            load!(self.FSI_Free_Count, "FSI_Free_Count");
+            load!(self.FSI_Nxt_Free, "FSI_Nxt_Free");
+            load!(self.FSI_TrailSig, "FSI_TrailSig");
+    }
+
+    fn load_fn<T: Copy>(dst: &mut T, src: &[u8], offset: usize, size: usize) {
+        unsafe {
+            core::ptr::copy_nonoverlapping(&src[offset], dst as *mut _ as *mut u8, size);
+        }
+    }
+
+    fn store_fn<T: Copy>(src: &T, dst: &mut [u8], offset: usize, size: usize) {
+        unsafe {
+            core::ptr::copy_nonoverlapping(src as *const _ as *const u8, &mut dst[offset], size);
+        }
     }
 
     pub fn update(&mut self, free_count: u32, nxt_free: u32) {
@@ -42,7 +81,7 @@ impl FSInfo {
     }
 
     pub fn nxt_free(&self) -> usize {
-        self.FSI_Free_Count as usize
+        self.FSI_Nxt_Free as usize
     }
 
     pub fn alloc_cluster(&mut self) -> usize {
@@ -58,31 +97,37 @@ impl FSInfo {
 
 }
 
-pub fn load_fn<T: Copy>(dst: &mut T, src: &[u8], offset: usize, size: usize) {
-    unsafe {
-        core::ptr::copy_nonoverlapping(&src[offset], dst as *mut _ as *mut u8, size);
+/*  Function: 在FSINFO全局变量结束之后，将其中的数据写入block中，再回写到磁盘上
+    Warning: store函数没有经过测试，store_fn函数同理，可能有问题！
+*/
+impl Drop for FSInfo {
+    fn drop(&mut self) {
+        let mut data:[u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+        self.block_cache
+            .as_ref()
+            .unwrap()
+            .lock()
+            .read(0, |da: &[u8; SECTOR_SIZE]|{
+                data.copy_from_slice(da);
+            });
+        
+        macro_rules! store {
+            ($a: expr, $b: expr, $c: expr, $d: expr) => {
+                Self::store_fn(&$a, $b, $c, $d);
+            };
+        }
+        store!(self.FSI_LeadSig, &mut data, 0, 4);
+        store!(self.FSI_StrucSig, &mut data, 484, 4);
+        store!(self.FSI_Free_Count, &mut data, 488, 4);
+        store!(self.FSI_Nxt_Free, &mut data, 492, 4);
+        store!(self.FSI_TrailSig, &mut data, 508, 4);
+
+        let block_cache = self.block_cache.as_ref().unwrap();
+        block_cache.lock().write(0, |sec_data: &mut [u8; SECTOR_SIZE]| {
+            sec_data.copy_from_slice(&data);
+        });
+        block_cache.lock().sync();
     }
-}
-
-pub fn load_fsinfo(map: Arc<BTreeMap<String, (usize, usize)>>, data: [u8; 512]) -> FSInfo {
-    let mut fs_info = FSInfo::default();
-
-    macro_rules! load {
-        ($a: expr, $b: expr) => {
-            if let Some((offset, size)) = map.get($b) {
-                load_fn(&mut $a, &data, *offset, *size);
-            }
-        };
-    }
-
-    load!(fs_info.FSI_LeadSig, "FSI_LeadSig");
-    load!(fs_info.FSI_StrucSig, "FSI_StrucSig");
-    load!(fs_info.FSI_Free_Count, "FSI_Free_Count");
-    load!(fs_info.FSI_Nxt_Free, "FSI_Nxt_Free");
-    load!(fs_info.FSI_TrailSig, "FSI_TrailSig");
-
-    fs_info
-
 }
 
 impl FSInfo {

@@ -1,12 +1,10 @@
 //! fat32文件系统对 VFS Dentry 的具体实现
-
-
+//! 
 use alloc::{string::{String, ToString}, sync::Arc, vec::Vec};
-use spin::mutex::Mutex;
 
-use crate::{config::fs::ROOT_CLUSTER_NUM, fs::{dentry::{cwd_and_path, dentry_name, path_plus_name, Dentry, DentryMeta, DentryMetaInner, DENTRY_CACHE}, info::{InodeMode, OpenFlags}, inode::Inode}};
+use crate::{config::fs::ROOT_CLUSTER_NUM, fs::{dentry::{cwd_and_path, dentry_name, path_plus_name, Dentry, DentryMeta, DentryMetaInner, DENTRY_CACHE}, info::{InodeMode, OpenFlags}, inode::Inode}, sync::SpinLock};
 
-use super::{block_cache::get_block_cache, data::{parse_child, DirEntry}, fat::{find_all_cluster, FatInfo}, fat_inode::{FatInode, NxtFreePos}, utility::cluster_to_sector, DirEntryStatus};
+use super::{block_cache::get_block_cache, data::{parse_child, DirEntry}, fat::{find_all_cluster, FatInfo}, fat_inode::{FatInode, NxtFreePos, NXTFREEPOS_CACHE}, utility::cluster_to_sector, DirEntryStatus};
 
 // 目录项的位置信息 （自身的cluster——通常在父目录中， offset——dentry的编号，内容的所在的cluster）
 // 如果self_cluster == 0，说明没有父目录，即是根目录
@@ -65,7 +63,7 @@ impl Dentry for FatDentry {
             Arc::clone(&inode), 
             path, 
             mode, 
-            self.fat_info.clone());
+            Arc::clone(&self.fat_info));
         Arc::new(FatDentry::new_from_inode(child_inode,self.fat_info.clone(), path))
     }
 
@@ -76,10 +74,10 @@ impl Dentry for FatDentry {
             Arc::clone(&inode), 
             path, 
             mode, 
-            self.fat_info.clone(),
+            Arc::clone(&self.fat_info),
             dev_id,
         );
-        Arc::new(FatDentry::new_from_inode(child_inode,self.fat_info.clone(), path))
+        Arc::new(FatDentry::new_from_inode(child_inode,Arc::clone(&self.fat_info), path))
     }
 
     // Assumption: name是单个名字
@@ -106,9 +104,11 @@ impl Dentry for FatDentry {
     }
 
     fn load_child(&self, this: Arc<dyn Dentry>) {
+        // 1. 找目录中所有的数据cluster
+        let mut nxt_free_pos = NxtFreePos::empty();
         let dev = Arc::clone(self.fat_info.dev.as_ref().expect("Block device is None"));
         let clusters: Vec<usize> = find_all_cluster(self.fat_info.clone(), self.data_cluster());
-        // 2. 分别从其中的cluster读出所需要的数据
+        // 2. 分别从其中的cluster读出所需要的数据，记录direntry的数据以及位置
         let mut dir_pos: Vec<(DirEntry, Position)> = Vec::new();
         'outer: for current_cluster in clusters.iter() {
             let start_sector = cluster_to_sector(self.fat_info.clone(), *current_cluster);
@@ -119,10 +119,14 @@ impl Dentry for FatDentry {
                         .read(num * core::mem::size_of::<DirEntry>(), |dir: &DirEntry| {
                             *dir
                         });
+                    // TODO：direntry的类型暂时只考虑四种
                     if dir.status() == DirEntryStatus::Empty {
+                        // 记录该目录在磁盘中可以写入的空entry的位置
+                        nxt_free_pos.update(*current_cluster, sec_id, num * core::mem::size_of::<DirEntry>());
                         break 'outer;
+                    } else if dir.status() == DirEntryStatus::Free {
+                        continue;
                     } else {
-                        // TODO: 这里还有一些dir的情况没有考虑到！
                         let pos = Position {
                             self_cluster: *current_cluster,
                             self_sector: sec_id,
@@ -134,16 +138,17 @@ impl Dentry for FatDentry {
                 }
             }
         }
+        // 将目录中空闲的下一位置给缓存起来
+        let ino = this.metadata().inner.lock().d_inode.metadata().i_ino;
+        NXTFREEPOS_CACHE.0.lock().as_mut().unwrap().insert(ino, nxt_free_pos);
         // 3. 解析相关数据并转换为inode和dentry
         let childs = parse_child(&dir_pos, self.fat_info.clone());
         for child in childs.into_iter() {
             let name = child.meta.inner.lock().d_name.clone();
-            // child.meta.inner.lock().d_path = self.meta.inner.lock().d_path.clone();
-            // child.meta.inner.lock().d_path.push_str(&name);
             let cwd = self.meta.inner.lock().d_path.clone();
             child.meta.inner.lock().d_path = cwd_and_path(&name, &cwd);
-            child.meta.inner.lock().d_parent = Some(Arc::downgrade(&this));
             // 维护好关系
+            child.meta.inner.lock().d_parent = Some(Arc::downgrade(&this));
             let child_rc: Arc<dyn Dentry> = Arc::new(child);
             self.meta.inner.lock().d_child.push(Arc::clone(&child_rc));
         }
@@ -175,7 +180,7 @@ impl Dentry for FatDentry {
             }
         }
         if id.is_none() {
-            todo!()
+            panic!("[kernel](unlink): No corresponding linked file");
         }
         DENTRY_CACHE.lock().remove(&child.metadata().inner.lock().d_path);
         child.metadata().inner.lock().d_inode.delete_data();
@@ -187,7 +192,7 @@ impl FatDentry {
     pub fn new_from_root(fat_info: Arc<FatInfo>, mount_point: &str, inode: Arc<dyn Inode> ) -> Self {
         Self {
             meta: DentryMeta {
-                inner: Mutex::new(DentryMetaInner {
+                inner: SpinLock::new(DentryMetaInner {
                     d_name: mount_point.to_string(),
                     d_path: mount_point.to_string(),
                     d_inode: inode,
@@ -217,7 +222,7 @@ impl FatDentry {
         let pos = inode.pos;
         Self {
             meta: DentryMeta {
-                inner: Mutex::new(DentryMetaInner {
+                inner: SpinLock::new(DentryMetaInner {
                     d_name: dentry_name(path).to_string(),
                     d_path: path.to_string(),
                     d_inode: Arc::new(inode),

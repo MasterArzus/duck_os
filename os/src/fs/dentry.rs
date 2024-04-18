@@ -21,14 +21,15 @@ use core::any::Any;
 use alloc::{string::{String, ToString}, sync::{Arc, Weak}, vec::Vec};
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
-use spin::Mutex;
+
+use crate::sync::SpinLock;
 
 use super::{file_system::FILE_SYSTEM_MANAGER, info::{InodeMode, OpenFlags}, inode::Inode};
 
 // TODO: 很多细节：诸如 函数正确性和逻辑、函数假设是否满足、path是否规范、Option、锁之类的都没考虑完全。
 
 pub struct DentryMeta {
-    pub inner: Mutex<DentryMetaInner>,
+    pub inner: SpinLock<DentryMetaInner>,
 }
 
 // 这些数据都是可能会被修改的，所以用锁保护起来。
@@ -54,7 +55,7 @@ impl DentryMeta {
             None => None,
         };
         Self { 
-            inner: Mutex::new(
+            inner: SpinLock::new(
                 DentryMetaInner {
                     d_name: name,
                     d_path: path,
@@ -81,7 +82,7 @@ pub trait Dentry: Sync + Send + Any {
 
 lazy_static! {
     // (path, Dentry)
-    pub static ref DENTRY_CACHE: Mutex<HashMap<String, Arc<dyn Dentry>>> = Mutex::new(HashMap::new());
+    pub static ref DENTRY_CACHE: SpinLock<HashMap<String, Arc<dyn Dentry>>> = SpinLock::new(HashMap::new());
 }
 
 // Assumption: 此时的path是合法的绝对路径，并且是format的
