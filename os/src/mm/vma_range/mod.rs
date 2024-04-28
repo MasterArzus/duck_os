@@ -10,14 +10,12 @@ use super::vma::VirtMemoryAddr;
 
 pub mod vma_range;
 
-
 pub enum UnmapOverlap {
     Unchange,
     Shrink,
     Removed,
     Split(VirtMemoryAddr),
 }
-
 
 pub enum SplitOverlap {
     Unchange,

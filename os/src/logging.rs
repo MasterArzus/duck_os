@@ -17,9 +17,11 @@ impl Log for SimpleLogger {
         }
         let color = level_to_color_code(record);
         println!(
-            "\u{1B}[{}m[{:>5}] {}\u{1B}[0m",
+            "\u{1B}[{}m[{:>5}] {}:{} {}\u{1B}[0m",
             color,
             record.level(),
+            record.file().unwrap(),
+            record.line().unwrap(),
             record.args(),
         );
     }

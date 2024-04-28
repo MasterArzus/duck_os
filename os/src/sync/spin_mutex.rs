@@ -51,10 +51,10 @@ impl<T: ?Sized, Action: MutexAction> SpinMutex<T, Action> {
                 .is_ok() {
                     break
                 }
-            else {
-                // case：此时已经是true，但是还是拿不到锁，所以应该要报错
-                todo!()
-            }
+            // else {
+            //     // case：此时已经是true，但是还是拿不到锁，所以应该要报错
+            //     todo!()
+            // }
         }
         SpinMutexGuard {
             mutex: &self,

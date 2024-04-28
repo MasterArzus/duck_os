@@ -1,5 +1,6 @@
-use log::error;
+use self::fs::sys_write;
 
+pub mod error;
 mod mm;
 mod fs;
 
@@ -113,12 +114,20 @@ const SYSCALL_MEMBARRIER: usize = 283;
 const SYSCALL_COPY_FILE_RANGE: usize = 285;
 
 pub fn syscall(id: usize, args: [usize; 6]) -> isize {
-    match id {
-
+    let result = match id {
+        SYSCALL_WRITE => {
+            sys_write(args[0], args[1], args[2])
+        }
 
         _ => {
-            error!("Unsupported syscall id {}", id);
-            0
+            panic!("Unsupported syscall id {}", id);
+        }
+    };
+
+    match result {
+        Ok(ret) => ret as isize,
+        Err(err) => {
+            -(err as isize)
         }
     }
 }

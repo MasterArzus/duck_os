@@ -16,13 +16,13 @@ impl PageCache {
     }
 
     fn to_offset(file_offset: usize) -> usize {
-        file_offset << PAGE_SIZE_BITS
+        file_offset >> PAGE_SIZE_BITS
     }
     
     pub fn find_page(&self, file_offset: usize, inode: Weak<dyn Inode>) -> Arc<Page> {
         let page = match self.pages.lock().get(&Self::to_offset(file_offset)) {
             Some(page) => Arc::clone(page),
-            None => Self::find_page_from_disk(&self, file_offset, inode),
+            None => Self::find_page_from_disk(&self, Self::to_offset(file_offset), inode),
         };
         page
     }
@@ -30,7 +30,7 @@ impl PageCache {
     fn find_page_from_disk(&self, offset: usize, inode: Weak<dyn Inode>) -> Arc<Page> {
         let page = Page::new_disk_page(PagePermission::R, inode, offset);
         let page_arc = Arc::new(page);
-        self.pages.lock().insert(Self::to_offset(offset), page_arc.clone());
+        self.pages.lock().insert(offset, page_arc.clone());
         page_arc
     }
 }

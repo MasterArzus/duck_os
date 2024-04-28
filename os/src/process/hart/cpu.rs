@@ -1,15 +1,18 @@
 //! 处理当前核中的信息
 
-use alloc::{sync::Arc, vec::Vec};
+use core::arch;
 
-use crate::{config::task::MAX_CORE_NUM, mm::memory_set::mem_set::kernel_space_activate, process::{context::TaskContext, pcb::{TaskStatus, PCB}, schedule::{pop_task_from_schedule, push_task_to_schedule}, switch::__switch, ORIGIN_TASK}};
+use alloc::{sync::Arc, vec::Vec};
+use log::*;
+
+use crate::{config::task::MAX_CORE_NUM, mm::memory_set::mem_set::kernel_space_activate, process::{context::TaskContext, pcb::{TaskStatus, PCB}, schedule::{pop_task_from_schedule, push_task_to_schedule}, switch::__switch, ORIGIN_TASK}, sbi, sync::SpinLock};
 
 use super::env::Env;
 
 pub struct CpuLocal {
     // pub id: usize,
     pub current: Option<Arc<PCB>>, 
-    pub env: Env,
+    pub env: SpinLock<Env>,
     pub idle_cx: TaskContext,
 }
 
@@ -17,7 +20,7 @@ impl CpuLocal {
     pub const fn empty() -> Self {
         Self {
             current: None,
-            env: Env::empty(),
+            env: SpinLock::new(Env::empty()),
             idle_cx: TaskContext::empty(),
         }
     }
@@ -45,10 +48,13 @@ pub fn run_task() {
             task.set_status(TaskStatus::Running);
             task.vm.lock().activate(); // 切换用户进程地址空间
             cpu_local.current = Some(task);
+            println!("Ready to go to user space");
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
             kernel_space_activate(); // 切换回内核地址空间
+            println!("Welcome back! This is duck os!");
+            loop {}
             // if let Some(task) = CPULOCALS[cpu_id].lock().take_current_pcb() {
             //     match task.status() {
             //         TaskStatus::Ready => {
@@ -97,11 +103,12 @@ pub fn exit_current_task(exit_code: i32) {
     for child in &task_inner.child {
         loop {
             if let Some(mut child_inner) = child.inner.try_lock() {
-                if let Some(mut origin_task_inner) = ORIGIN_TASK.clone().inner.try_lock() {
-                    child_inner.parent = Some(Arc::downgrade(&ORIGIN_TASK));
+                unsafe {
+                if let Some(mut origin_task_inner) = ORIGIN_TASK.as_ref().unwrap().clone().inner.try_lock() {
+                    child_inner.parent = Some(Arc::downgrade(ORIGIN_TASK.as_ref().unwrap()));
                     child_inner.ppid = 0;
                     origin_task_inner.child.push(child.clone());
-                }
+                }}
             }
         }
     }
@@ -129,8 +136,37 @@ pub fn init_cpu_locals() {
     }
 }
 
+pub fn get_cpu_local(cpu_id: usize) -> &'static CpuLocal {
+    unsafe {
+        &CPULOCALS[cpu_id]
+    }
+}
+
 pub fn get_mut_cpu_local(cpu_id: usize) -> &'static mut CpuLocal{
     unsafe {
         &mut CPULOCALS[cpu_id]
+    }
+}
+
+pub fn init() {
+    let cpu_id = get_cpu_id();
+    let sp_top: usize;
+    unsafe { arch::asm!("mv {0}, sp", out(reg) sp_top);}
+    info!("[kernel]: Initialize hart");
+    trace!("hart id: {}, hart sp: 0x{:X}", cpu_id, sp_top);
+    trace!("init hart {} finished", cpu_id);
+}
+
+pub fn start_other_hart() {
+    let hart_id: usize = get_cpu_id();
+    // let mut is_first = false;
+    let hart_num = 2usize;
+    for i in 0..hart_num {
+        if i == hart_id {
+            continue;
+        }
+        println!("Start hart {}", i);
+        sbi::hart_start(i, 0x80200000);
+        
     }
 }

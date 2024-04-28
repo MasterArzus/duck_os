@@ -13,8 +13,14 @@ pub mod cow;
 /// 
 pub mod type_cast;
 
-/// 
-pub fn init_mm() {
+// 内存方面的初始化 heap, frame, kernel_space
+pub fn init() {
+    log::info!("[kernel]: Initialize memory");
     allocator::heap::init_heap();
+    // allocator::heap::heap_test();
     allocator::frame::init_frame_allocator();
+    // allocator::frame::frame_test();
+    // address::address_test();
+    memory_set::mem_set::init_kernel_space();
+    // memory_set::mem_set::remap_test();
 }

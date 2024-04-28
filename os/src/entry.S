@@ -7,7 +7,7 @@ _start:
     # 1.According to hart_id, set sp to the top
     la sp, boot_stack_top
     mv tp, a0
-    slli t0, tp, 16
+    slli t0, tp, 16 # 内核栈大小size: (4096 * 16)
     sub sp, sp, t0
     
     # 2.set table & satp
@@ -31,7 +31,7 @@ _start:
 
     .globl boot_stack_lower
 boot_stack_lower:
-# 最多8个核，每个核有16页——64kb
+# 内核栈总大小：最多8个核，每个核有15页，再加上一个guard page, 总共16页——64kb
     .space 4096 * 16 * 8  
 
     .globl boot_stack_top

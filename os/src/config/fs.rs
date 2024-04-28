@@ -11,7 +11,7 @@ pub const BOOT_SECTOR_ID: usize = 0;
 pub const FSINFO_SECTOR_ID: usize = 1;
 
 // cache manager 的大小
-pub const SECTOR_CACHE_SIZE: usize = 16;
+pub const SECTOR_CACHE_SIZE: usize = 64;
 
 // 根目录data cluster的位置
 pub const ROOT_CLUSTER_NUM: usize = 2;

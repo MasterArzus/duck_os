@@ -1,15 +1,17 @@
 //! 这个是 copy-on-write 模块 
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use crate::utils::cell::SyncUnsafeCell;
 
 use super::{address::vpn_to_virt, memory_set::page_fault::{CowPageFaultHandler, PageFaultHandler}, page_table::PageTable, pma::Page, type_cast::PTEFlags};
 
-
 pub struct CowManager {
     // (vpn, page)
     pub page_manager: SyncUnsafeCell<BTreeMap<usize, Arc<Page>>>,
+    // (ppn) 共享的page的ppn 和 可能要修改的page_table信息
+    // pub page_manager: Vec<usize>,
+    // pub fa_pt_paddr: Option<usize>,
     pub handler: Arc<dyn PageFaultHandler>,
 }
 
@@ -17,6 +19,8 @@ impl CowManager {
     pub fn new() -> Self {
         Self {
             page_manager: SyncUnsafeCell::new(BTreeMap::new()),
+            // page_manager: Vec::new(),
+            // fa_pt_raddr: None,
             handler: Arc::new(CowPageFaultHandler {}.clone())
         }
     }

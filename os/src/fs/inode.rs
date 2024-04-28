@@ -29,7 +29,7 @@
 
 use core::sync::atomic::AtomicUsize;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use spin::mutex::Mutex;
 
 use crate::driver::BlockDevice;
@@ -87,6 +87,8 @@ pub trait Inode: Sync + Send {
     fn delete_data(&self);
     fn read(&self, offset: usize, buf: &mut [u8]);
     fn write(&self, offset: usize, buf: &mut [u8]);
+    // 用于读整个elf文件
+    fn read_all(&self) -> Vec<u8>;
 }
 
 pub enum InodeDev {

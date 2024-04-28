@@ -2,7 +2,7 @@
 
 use alloc::{string::ToString, sync::Arc};
 
-use crate::{config::fs::{BOOT_SECTOR_ID, SECTOR_SIZE}, driver::BlockDevice, fs::{dentry::Dentry, file_system::{FSFlags, FSType, FileSystem, FileSystemMeta}, inode::Inode}, sync::SpinLock};
+use crate::{config::fs::{BOOT_SECTOR_ID, SECTOR_SIZE}, driver::BlockDevice, fs::{dentry::Dentry, fat32::fat_inode::NXTFREEPOS_CACHE, file_system::{FSFlags, FSType, FileSystem, FileSystemMeta}, inode::Inode}, sync::SpinLock};
 
 use super::{bpb::load_bpb, fat::FatInfo, fat_dentry::FatDentry, fat_inode::FatInode, fsinfo::FSInfo, utility::{fat_sector, init_map}};
 
@@ -36,6 +36,8 @@ impl Fat32FileSystem {
         dev: Arc<dyn BlockDevice>,
         flags: FSFlags,
     ) -> Self {
+        // 初始化相关的cache
+        NXTFREEPOS_CACHE.init();
         // 1. 读 bpb —— 从disk到block cache,同时检查bpb
         let mut boot_sec_data: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
         // 这个数据只需要读一次即可，所以不需要使用cache
@@ -43,7 +45,7 @@ impl Fat32FileSystem {
         let map = init_map();
         let bpb = load_bpb(map.clone(), boot_sec_data);
         if !bpb.is_valid() {
-            todo!();
+            panic!("The fat32 magic is wrong!");
         };
         // 2. 读 fsinfo，从disk到block，系统结束时回写，期间所有的修改保存在FSINFO中
         

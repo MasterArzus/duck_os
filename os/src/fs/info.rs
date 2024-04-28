@@ -61,6 +61,7 @@ impl TimeSpec {
 
 // https://man7.org/linux/man-pages/man2/open.2.html
 bitflags! {
+    #[derive(Clone)]
     pub struct OpenFlags: u32 {
         // 只读模式
         const O_RDONLY = 0;

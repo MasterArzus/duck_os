@@ -1,8 +1,10 @@
 //! fat32文件系统对 VFS Dentry 的具体实现
 //! 
+use core::fmt::Debug;
+
 use alloc::{string::{String, ToString}, sync::Arc, vec::Vec};
 
-use crate::{config::fs::ROOT_CLUSTER_NUM, fs::{dentry::{cwd_and_path, dentry_name, path_plus_name, Dentry, DentryMeta, DentryMetaInner, DENTRY_CACHE}, info::{InodeMode, OpenFlags}, inode::Inode}, sync::SpinLock};
+use crate::{config::fs::ROOT_CLUSTER_NUM, fs::{dentry::{cwd_and_name, cwd_and_path, dentry_name, path_plus_name, Dentry, DentryMeta, DentryMetaInner, DENTRY_CACHE}, info::{InodeMode, OpenFlags}, inode::Inode}, sync::SpinLock};
 
 use super::{block_cache::get_block_cache, data::{parse_child, DirEntry}, fat::{find_all_cluster, FatInfo}, fat_inode::{FatInode, NxtFreePos, NXTFREEPOS_CACHE}, utility::cluster_to_sector, DirEntryStatus};
 
@@ -146,7 +148,7 @@ impl Dentry for FatDentry {
         for child in childs.into_iter() {
             let name = child.meta.inner.lock().d_name.clone();
             let cwd = self.meta.inner.lock().d_path.clone();
-            child.meta.inner.lock().d_path = cwd_and_path(&name, &cwd);
+            child.meta.inner.lock().d_path = cwd_and_name(&name, &cwd);
             // 维护好关系
             child.meta.inner.lock().d_parent = Some(Arc::downgrade(&this));
             let child_rc: Arc<dyn Dentry> = Arc::new(child);

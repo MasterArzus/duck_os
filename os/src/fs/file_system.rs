@@ -73,6 +73,7 @@ pub trait FileSystem: Send + Sync {
 
 pub struct FileSystemManager {
     // (mounting point name, FileSystem)
+    // 可以换成 hashmap
     pub manager: Mutex<BTreeMap<String, Arc<dyn FileSystem>>>,
 }
 
@@ -121,18 +122,18 @@ impl FileSystemManager {
             mount_point.to_string(),
             Arc::clone(&fs),
         );
-
     }
 
+    // 找到fs，和fs中的meta, 移除inode_cache, fs_manager中的数据。
     pub fn unmount(&self, mount_point: &str) {
-        // let fs_op = FILE_SYSTEM_MANAGER.manager.lock().get(mount_point);
-        // let fs: Arc<dyn FileSystem>;
-        // if fs_op.is_none() {
-        //     todo!();
-        // } else {
-        //     fs = Arc::clone(fs_op.unwrap());
-        // }
-        // DENTRY_CACHE.lock().remove(mount_point);
+        let mut fs_manager = FILE_SYSTEM_MANAGER.manager.lock();
+        let fs_op = fs_manager.get(mount_point);
+        if fs_op.is_none() {
+            todo!();
+        }
+
+        DENTRY_CACHE.lock().remove(mount_point);
+        fs_manager.remove(mount_point);
     }
 
 }

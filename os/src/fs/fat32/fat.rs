@@ -1,5 +1,7 @@
 //! fat32文件系统中的fat部分
 
+use core::fmt::Debug;
+
 use alloc::{sync::Arc, vec::Vec};
 
 use crate::driver::BlockDevice;
@@ -7,10 +9,11 @@ use crate::driver::BlockDevice;
 use super::{block_cache::get_block_cache, fat_fs::FSINFO, utility::{cluster_to_entry, entry_pos}, FatEntryStatus};
 
 // TODO: 暂时设置为这个值，正确的值应该是 count_cluster + 1, 但是暂时不好处理。
-const MAX_CLUSTER: u32 = 65525;
+const MAX_CLUSTER: u32 = 0x0FFF_FFEF;
 
 // 表示当前簇的状态，fat的编号和簇是一一对应的
 // 即 2号fat_entry对应的就是2号簇
+#[derive(Debug)]
 #[repr(C)]
 pub struct FatEntry {
     pub value: u32,
@@ -20,7 +23,7 @@ impl FatEntry {
     pub fn status(&self) -> FatEntryStatus {
         if self.value == 0 {
             FatEntryStatus::Free
-        } else if self.value == 0xFFFF_FFFF {
+        } else if self.value == 0x0FFF_FFFF || self.value == 0x0FFF_FFF8 {
             FatEntryStatus::EndOfFile
         } else if self.value >= 0x2 && self.value <= MAX_CLUSTER {
             FatEntryStatus::Next(self.value as usize)
@@ -55,7 +58,7 @@ pub fn alloc_cluster(prev_id: Option<usize>, fat_info: Arc<FatInfo>) -> Option<u
         get_block_cache(sector_id, Arc::clone(&fat_info.dev.as_ref().unwrap()))
             .lock()
             .write(offset, |fat_dentry: &mut FatEntry|{
-                fat_dentry.value = 0xFFFF_FFFF;
+                fat_dentry.value = 0x0FFF_FFFF;
         });
     
     Some(nxt_cluster)
@@ -69,7 +72,7 @@ pub fn free_cluster(id: usize, prev_id: Option<usize>, fat_info: Arc<FatInfo>) {
             .lock()
             .write(offset, |fat_dentry: &mut FatEntry|{
                 assert!(fat_dentry.value == id as u32);
-                fat_dentry.value = 0xFFFF_FFFF;
+                fat_dentry.value = 0x0FFF_FFFF;
         });
     }
     FSINFO.lock().free_cluster();
@@ -77,7 +80,7 @@ pub fn free_cluster(id: usize, prev_id: Option<usize>, fat_info: Arc<FatInfo>) {
     get_block_cache(sector_id, Arc::clone(&fat_info.dev.as_ref().unwrap()))
         .lock()
         .write(offset, |fat_dentry: &mut FatEntry|{
-            assert!(fat_dentry.value == 0xFFFF_FFFF as u32);
+            assert!(fat_dentry.value == 0x0FFF_FFFF as u32);
             fat_dentry.value = 0x0;
         });
 }
@@ -139,5 +142,19 @@ impl FatInfo {
             num_fat,
             dev,
         }
+    }
+}
+
+impl Debug for FatInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "FatInfo is [
+                fat's sector: {}, 
+                fat's size: {}, 
+                byte_per_sec: {}, 
+                sec_per_cluster: {},
+                num_fat: {},
+            ]", self.sector, self.size, self.byte_per_sec, self.sec_per_clus, self.num_fat
+        ))
     }
 }

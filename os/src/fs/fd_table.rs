@@ -1,12 +1,13 @@
 //! 文件描述符表
 
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{ sync::Arc, vec::Vec};
 use bitmap_allocator::{BitAlloc, BitAlloc4K};
+use hashbrown::HashMap;
 use spin::Mutex;
 
 use crate::config::fs::MAX_FD;
 
-use super::{file::File, info::OpenFlags};
+use super::{file::File, info::OpenFlags, stdio::{Stderr, Stdin, Stdout, STDERR, STDIN, STDOUT}};
 
 type FdAllocatorImpl = BitAlloc4K;
 
@@ -45,8 +46,9 @@ pub fn dealloc_fd(fd: usize) {
 }
 
 // 这里的fd没有实现RAII，之后根据需求再判断要不要实现
+// TODO: 这里的fd_table完全可以更换为 hash table，而不采用BTreeMap
 pub struct FdTable {
-    pub fd_table: BTreeMap<usize, FdInfo>,
+    pub fd_table: HashMap<usize, FdInfo>,
 }
 
 impl FdTable {
@@ -55,7 +57,20 @@ impl FdTable {
     }
 
     pub fn init_fdtable() -> Self {
-        Self { fd_table: BTreeMap::new() }
+        let mut fd_table = HashMap::new();
+        fd_table.insert(
+            STDIN, 
+            FdInfo::new(Arc::new(Stdin), OpenFlags::O_RDONLY)
+        );
+        fd_table.insert(
+            STDOUT, 
+            FdInfo::new(Arc::new(Stdout), OpenFlags::O_WRONLY)
+        );
+        fd_table.insert(
+            STDERR, 
+            FdInfo::new(Arc::new(Stderr), OpenFlags::O_WRONLY)
+        );
+        Self { fd_table }
     }
 
     pub fn close_exec(&mut self) {
@@ -73,6 +88,7 @@ impl FdTable {
     }
 }
 
+#[derive(Clone)]
 pub struct FdInfo {
     pub file: Arc<dyn File>,
     pub flags: OpenFlags,

@@ -7,6 +7,7 @@ use core::arch::asm;
 
 // (EID, FID)
 const SBI_CONSOLE_PUTCHAR: (usize, usize) = (1, 0);
+const SBI_HART_START: (usize, usize) = (0x48534d, 0);
 
 /// general sbi call
 #[inline(always)]
@@ -34,4 +35,9 @@ pub fn console_putchar(c: usize) {
 use crate::board::QEMUExit;
 pub fn shutdown() -> ! {
     crate::board::QEMU_EXIT_HANDLE.exit_failure();
+}
+
+/// use sbi call to start the specific core
+pub fn hart_start(hart_id: usize, start_addr: usize) -> usize {
+    sbi_call(SBI_HART_START, hart_id, start_addr, 0)
 }

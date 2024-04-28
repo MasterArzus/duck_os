@@ -46,7 +46,7 @@ impl BootSector {
     // 先不添加报错的功能，太繁琐了。之后考虑修改为 Result<(), Error>
     pub fn is_valid(&self) -> bool {
         let mut result = true;
-        if self.BS_jmpBoot[0] != 0xEB || self.BS_jmpBoot[0] != 0xE9 {
+        if self.BS_jmpBoot[0] != 0xEB && self.BS_jmpBoot[0] != 0xE9 {
             result = false;
         }
         if self.BS_jmpBoot[0] == 0xEB && self.BS_jmpBoot[2] != 0x90 {

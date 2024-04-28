@@ -86,7 +86,7 @@ pub fn entry_pos(fat_info: Arc<FatInfo>, entry_id: usize) -> (usize, usize) {
 
 //给一个cluster number N, 确定它所在的起始扇区编号
 pub fn cluster_to_sector(fat_info: Arc<FatInfo>, cluster: usize) -> usize {
-    (cluster - 2) * fat_info.byte_per_sec
+    (cluster - 2) * fat_info.sec_per_clus
     + fat_info.sector
     + fat_info.size * fat_info.num_fat
 }

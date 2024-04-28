@@ -20,10 +20,9 @@
 use core::fmt::{self, Formatter, Debug};
 
 use alloc::vec::Vec;
-use spin::Mutex;
 use bitmap_allocator::BitAlloc;
 
-use crate::{config::mm::MEMORY_END, mm::address::{byte_array, phys_to_ppn, phys_to_ppn_next, ppn_to_phys}};
+use crate::{config::mm::MEMORY_END,mm::address::{byte_array, phys_to_ppn, phys_to_ppn_next, ppn_to_phys, virt_to_phys}, sync::SpinLock};
 
 // 16M * 4K = 64G，所以可以分配64G的内存
 // 如果再小一点，只有4G的选项可以选择，这又有点小
@@ -85,14 +84,17 @@ impl FrameAllocator for FrameAllocatorImpl {
 }
 
 // TODO: 现在是一把大锁，以后估计要换锁。
-pub static FRAME_ALLOCATOR: Mutex<FrameAllocatorImpl> = Mutex::new(FrameAllocatorImpl::DEFAULT);
+pub static FRAME_ALLOCATOR: SpinLock<FrameAllocatorImpl> = SpinLock::new(FrameAllocatorImpl::DEFAULT);
 
 pub fn init_frame_allocator() {
     extern "C" {
         fn ekernel();
     }    
-    let start_ppn = phys_to_ppn_next(ekernel as usize);
+    let start_ppn = phys_to_ppn_next(virt_to_phys( ekernel as usize));
     let end_ppn = phys_to_ppn(MEMORY_END);
+    log::info!("[kernel]: Initialize frame allocator.");
+    log::trace!("[kernel]: start_pa: {:X}, end_pa: {:X}, size: {}Mb", 
+        ppn_to_phys(start_ppn), MEMORY_END, (end_ppn - start_ppn)/(1<<8));
     FRAME_ALLOCATOR
         .lock()
         .init(start_ppn, end_ppn);
@@ -120,4 +122,39 @@ pub fn alloc_contiguous_frame(num: usize) -> Option<Vec<FrameTracker>> {
 
 pub fn dealloc_frame(ppn: usize) {
     FRAME_ALLOCATOR.lock().dealloc_frame(ppn);
+}
+
+#[allow(unused)]
+pub fn frame_test() {
+    log::info!("[test]: Start frame_test");
+    let mut v: Vec<FrameTracker> = Vec::new();
+    println!("The fisrt test:");
+    for i in 0..5 {
+        let frame = alloc_frame().unwrap();
+        println!("{:?}", frame);
+        if i != 0 {
+            v.push(frame);
+        }
+    }
+    v.clear();
+
+    println!("The second test:");
+    for i in 0..5 {
+        let frame = alloc_frame().unwrap();
+        println!("{:?}", frame);
+        v.push(frame);
+    }
+    v.pop();
+    v.pop();
+
+    println!("The third test:");
+    let mut frames = alloc_contiguous_frame(10).unwrap();
+    for i in 0..frames.len() {
+        println!("{:?}", frames[i]);
+    }
+    frames.clear();
+    drop(frames);
+    drop(v);
+    log::info!("[test]: Frame_test passed!");
+    
 }

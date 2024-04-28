@@ -2,7 +2,7 @@ use alloc::collections::BTreeMap;
 
 use crate::{
     config::mm::{LOW_LIMIT, UPPER_LIMIT}, 
-    mm::{page_table::{self, PageTable, PageTableEntry}, type_cast::MapPermission, vma::{self, VirtMemoryAddr}}
+    mm::{page_table::PageTable, type_cast::MapPermission, vma::VirtMemoryAddr}
 };
 
 use super::{SplitOverlap, UnmapOverlap};
@@ -93,6 +93,7 @@ impl VmaRange {
     // 查找空的空间
     // 如果hint为0,则从最下面LOW_LIMIT开始分配空间
     // 如果hint不为0,则之前会保证其会在一个相对合理的位置，最后实在不行就分配在最高的那个vma的上面。
+    // TODO：这里应该有一个固定空间用来分配
     pub fn find_anywhere(&self, hint: usize, len: usize) -> Option<usize> {
         let mut last_end = hint.max(LOW_LIMIT);
         for (start, vma) in self.segments.iter() {

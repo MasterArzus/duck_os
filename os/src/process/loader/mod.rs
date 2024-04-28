@@ -1,8 +1,9 @@
 //！ 加载模块 —— 目前只实现静态加载
 
 use alloc::{string::String, sync::Arc, vec::Vec};
+use virtio_drivers::PAGE_SIZE;
 
-use crate::{config::mm::{USER_STACK_BOTTOM, USER_STACK_SIZE}, mm::{address::vaddr_offset, memory_set::{mem_set::MemeorySet, page_fault::UStackPageFaultHandler}, type_cast::MapPermission, vma::{MapType, VirtMemoryAddr, VmaType}}};
+use crate::{config::mm::{USER_STACK_BOTTOM, USER_STACK_SIZE}, mm::{address::{align_up, vaddr_offset}, memory_set::{mem_set::MemeorySet, page_fault::{UHeapPageFaultHandler, UStackPageFaultHandler}}, type_cast::MapPermission, vma::{MapType, VirtMemoryAddr, VmaType}}};
 use self::stack::{StackInfo, StackLayout};
 
 pub mod dynamic;
@@ -24,10 +25,13 @@ pub fn load_elf(data: &[u8], vm: &mut MemeorySet, args: Vec<String>, envs: Vec<S
     let elf = xmas_elf::ElfFile::new(&data).unwrap();
     // 检查魔数
     if !check_magic(&elf) {
-        panic!()
+        panic!("ELF magic wrong");
     }
     // 开始映射
     let ph_count = elf.header.pt2.ph_count();
+    // TODO：当这个为动态链接时，会被修改
+    let mut entry_point = elf.header.pt2.entry_point() as usize;
+    let mut heap_start: usize = 0;
     for i in 0..ph_count {
         let ph = elf.program_header(i).unwrap();
         if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
@@ -56,23 +60,42 @@ pub fn load_elf(data: &[u8], vm: &mut MemeorySet, args: Vec<String>, envs: Vec<S
                 Some(&elf.input[ph.offset() as usize..(ph.offset() + ph.file_size()) as usize]),
                 vaddr_offset(start_va)
             );
+            heap_start = heap_start.max(align_up(end_va));
         }
     }
     // 映射用户栈
     let user_stack_bottom = USER_STACK_BOTTOM;
     let user_stack_top = user_stack_bottom - USER_STACK_SIZE;
-    vm.push_no_map(VirtMemoryAddr::new(
+    // TODO： 修改为push_no_map的形式
+    vm.push(VirtMemoryAddr::new(
         user_stack_top, 
-        user_stack_bottom, 
+        user_stack_bottom,
         MapPermission::U | MapPermission::R | MapPermission::W, 
         MapType::Framed, 
         VmaType::UserStack,
         Some(Arc::new(UStackPageFaultHandler {}))
-    ));
+        ),
+        None,
+        0
+    );
 
+    let heap_end = heap_start;
+    vm.push(VirtMemoryAddr::new(
+        heap_start, 
+        heap_end, 
+        MapPermission::U | MapPermission::R | MapPermission::W, 
+        MapType::Framed, 
+        VmaType::UserHeap,
+        Some(Arc::new(UHeapPageFaultHandler {})) 
+        ),
+        None,
+        0
+    );
+    vm.heap_start = heap_start;
+    println!("The heap start is 0x{:x}", heap_start);
     let mut stack_layout: Option<StackLayout> = None;
     // 需要构建user stack中的内容
-    if !args.is_empty() && envs.is_empty() {
+    if !args.is_empty() || !envs.is_empty() {
         // 传递auxv的相关值
         let mut stack_info = StackInfo::empty();
         stack_info.init_arg(args, envs);
@@ -81,6 +104,7 @@ pub fn load_elf(data: &[u8], vm: &mut MemeorySet, args: Vec<String>, envs: Vec<S
         let (sp, layout) = stack_info.build_stack(user_stack_bottom - 1);
         stack_layout = Some(layout);
     }
-    (0, 0, stack_layout)
+    println!("The entry_point is {:x}, user_stack_top is {:x}, user_stack_bottom is {:x}", entry_point, user_stack_top, user_stack_bottom);
+    (entry_point, user_stack_bottom - PAGE_SIZE, stack_layout)
     
 }

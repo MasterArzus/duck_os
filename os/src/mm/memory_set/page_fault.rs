@@ -61,6 +61,24 @@ impl PageFaultHandler for UStackPageFaultHandler {
 }
 
 #[derive(Clone)]
+pub struct UHeapPageFaultHandler {}
+
+impl PageFaultHandler for UHeapPageFaultHandler {
+    fn handler_page_fault(
+            &self,
+            vma: &VirtMemoryAddr,
+            vaddr: VirtAddr,
+            ms: Option<&MemeorySet>,
+            pt: &mut PageTable,
+        ) {
+        todo!()
+    }
+    fn is_legal(&self, scause: Scause) -> bool {
+        false
+    }
+}
+
+#[derive(Clone)]
 pub struct MmapPageFaultHandler {}
 
 // TODO：有点复杂，暂时不完成，需要完成文件的回写。

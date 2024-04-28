@@ -22,7 +22,7 @@ impl Schedule {
 }
 
 pub fn init_schedule() {
-    SCHEDULE.lock().task_queue.push_back(Arc::clone(&ORIGIN_TASK));
+    SCHEDULE.lock().task_queue.push_back(Arc::clone(unsafe {ORIGIN_TASK.as_ref().unwrap()}));
 }
 
 pub fn push_task_to_schedule(pcb: Arc<PCB>) {

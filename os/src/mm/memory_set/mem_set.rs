@@ -26,8 +26,7 @@ use log::info;
 use riscv::register::scause::Scause;
 
 use crate::{
-    config::mm::{LOW_LIMIT, MEMORY_END, USER_UPPER_LIMIT}, 
-    mm::{cow::CowManager, page_table::PageTable, type_cast::{MapPermission, PTEFlags}, vma::{MapType, VirtMemoryAddr, VmaType}, vma_range::vma_range::VmaRange}, utils::cell::SyncUnsafeCell,
+    config::{mm::{LOW_LIMIT, MEMORY_END, PAGE_SIZE, PHY_TO_VIRT_OFFSET, USER_UPPER_LIMIT}, task::{CORE_STACK_SIZE, MAX_CORE_NUM}}, console::print, driver::qemu::MMIO, mm::{address::{align_down, virt_to_vpn}, cow::CowManager, page_table::PageTable, type_cast::{MapPermission, PTEFlags}, vma::{MapType, VirtMemoryAddr, VmaType}, vma_range::vma_range::VmaRange}, stack_trace, utils::{cell::SyncUnsafeCell, stack_trace}
 };
 
 
@@ -37,6 +36,7 @@ pub struct MemeorySet {
     // 底下没有数据结构拥有页表，所以不用Arc，没有多个所有者
     // pt的借用关系难以管理，所以使用cell,但是为什么要使用sync? (一般情况下在多线程中传递引用)
     pub pt: SyncUnsafeCell<PageTable>,
+    pub heap_start: usize,
     // is_user: bool,
     // pub heap_range
     pub cow_manager: CowManager,
@@ -46,12 +46,15 @@ pub struct MemeorySet {
 pub static mut KERNEL_SPACE: Option<MemeorySet> = None;
 
 pub fn init_kernel_space() {
+    info!("[kernel]: Start to initialize kernel space.");
     unsafe {
         KERNEL_SPACE = Some(MemeorySet::new_kernel());
         KERNEL_SPACE.as_ref().unwrap().activate();
     }
+    info!("[kernel]: Kernel space finished!");
 }
 
+// 切换为内核的地址空间
 pub fn kernel_space_activate() {
     unsafe { KERNEL_SPACE.as_ref().map(MemeorySet::activate); }
 }
@@ -63,6 +66,8 @@ extern "C" {
     fn erodata();
     fn sdata();
     fn edata();
+    fn sstack();
+    fn estack();
     fn sbss();
     fn ebss();
     fn ekernel();
@@ -72,33 +77,16 @@ impl MemeorySet {
     /*
         function: 完成内核地址空间的初始化
         TODO: 还没有考虑其他的sections，例如Trampoline
+        地址空间的创建一般都是虚拟空间转物理地址空间。（注意逻辑）但是这里我们先有了物理地址空间，于是要假装没有物理地址空间
+        创建好虚拟地址空间，然后固定的映射到先前的物理地址去。
      */
     pub fn new_kernel() -> Self {
         let mut kernel_memory_set = MemeorySet {
             areas: VmaRange::new(), 
             pt: SyncUnsafeCell::new(PageTable::new()),
+            heap_start: 0,
             cow_manager: CowManager::new()
         };
-        info!(
-            "[kernel] initial kernel. [stext..etext] is [{:#x}..{:#x}]",
-            stext as usize, etext as usize,
-        );
-        info!(
-            "[kernel] initial kernel. [srodata..erodata] is [{:#x}..{:#x}]",
-            srodata as usize, erodata as usize,
-        );
-        info!(
-            "[kernel] initial kernel. [sdata..edata] is [{:#x}..{:#x}]",
-            sdata as usize, edata as usize,
-        );
-        info!(
-            "[kernel] initial kernel. [sbss..ebss] is [{:#x}..{:#x}]",
-            sbss as usize, ebss as usize,
-        );
-        info!(
-            "[kernel] initial kernel. [ekernel..MEMORY_END] is [{:#x}..{:#x}]",
-            ekernel as usize, MEMORY_END as usize,
-        );
 
         kernel_memory_set.push(
             VirtMemoryAddr::new(
@@ -111,6 +99,10 @@ impl MemeorySet {
             ),
             None,
             0
+        );
+        info!(
+            "[kernel] initial kernel. [stext..etext] is [{:#x}..{:#x}]",
+            stext as usize, etext as usize,
         );
 
         kernel_memory_set.push(
@@ -125,7 +117,10 @@ impl MemeorySet {
             None,
             0
         );
-
+        info!(
+            "[kernel] initial kernel. [srodata..erodata] is [{:#x}..{:#x}]",
+            srodata as usize, erodata as usize,
+        );
         kernel_memory_set.push(
             VirtMemoryAddr::new(
                 sdata as usize,
@@ -138,7 +133,32 @@ impl MemeorySet {
             None,
             0
         );
+        info!(
+            "[kernel] initial kernel. [sdata..edata] is [{:#x}..{:#x}]",
+            sdata as usize, edata as usize,
+        );
 
+        for cpu_id in 0..MAX_CORE_NUM {
+            let per_stack_top = (estack as usize) - CORE_STACK_SIZE * cpu_id;
+            let per_stack_bottom = per_stack_top - CORE_STACK_SIZE + PAGE_SIZE;
+            kernel_memory_set.push(
+                VirtMemoryAddr::new(
+                    per_stack_bottom as usize, 
+                    per_stack_top as usize, 
+                    MapPermission::R | MapPermission::W, 
+                    MapType::Direct, 
+                    VmaType::Elf,
+                    None
+                ),
+                None,
+                0
+            );
+            info!(
+                "[kernel] initial cpu_id:{} kernel. [sstack..estack] is [{:#x}..{:#x}]",
+                cpu_id, per_stack_bottom as usize, per_stack_top as usize,
+            );
+        }
+        
         kernel_memory_set.push(
             VirtMemoryAddr::new(
                 sbss as usize, 
@@ -151,11 +171,14 @@ impl MemeorySet {
             None,
             0
         );
-
+        info!(
+            "[kernel] initial kernel. [sbss..ebss] is [{:#x}..{:#x}]",
+            sbss as usize, ebss as usize,
+        );
         kernel_memory_set.push(
             VirtMemoryAddr::new(
                 ekernel as usize, 
-                MEMORY_END as usize, 
+                MEMORY_END + PHY_TO_VIRT_OFFSET as usize, 
                 MapPermission::R | MapPermission::W, 
                 MapType::Direct, 
                 VmaType::PhysFrame,
@@ -164,6 +187,28 @@ impl MemeorySet {
             None,
             0
         );
+        info!(
+            "[kernel] initial kernel. [ekernel..MEMORY_END] is [{:#x}..{:#x}]",
+            ekernel as usize, MEMORY_END + PHY_TO_VIRT_OFFSET as usize,
+        );
+        for (name, start, len, map_per) in MMIO {
+            info!(
+                "[kernel] initial kernel. [MMIO]{} is [{:#x}..{:#x}]",
+                name, start + PHY_TO_VIRT_OFFSET, start + len + PHY_TO_VIRT_OFFSET,
+            );
+            kernel_memory_set.push(
+                VirtMemoryAddr::new(
+                    start + PHY_TO_VIRT_OFFSET,
+                    start + len + PHY_TO_VIRT_OFFSET,
+                    *map_per,
+                    MapType::Direct,
+                    VmaType::Mmio,
+                    None,
+                ),
+                None,
+                0,
+            );
+        }
         info!("[kernel] Initail kernel finished!");
         kernel_memory_set
     }
@@ -177,6 +222,7 @@ impl MemeorySet {
         Self {
             areas: VmaRange::new(),
             pt,
+            heap_start: 0,
             cow_manager: CowManager::new(),
         }
     }
@@ -349,4 +395,35 @@ impl MemeorySet {
         self.areas.unmap(LOW_LIMIT, USER_UPPER_LIMIT, self.pt.get_mut())
     }
 
+}
+
+#[allow(unused)]
+/// 检查 page_table
+pub fn remap_test() {
+    info!("remap_test start...");
+    let kernel_space = unsafe { KERNEL_SPACE.as_ref().unwrap() };
+    let mid_text = (stext as usize + (etext as usize - stext as usize) / 2);
+    let mid_rodata =
+        (srodata as usize + (erodata as usize - srodata as usize) / 2);
+    let mid_data = (sdata as usize + (edata as usize - sdata as usize) / 2);
+    // log::info!(
+    //     "mid text {:#x}, mid rodata {:#x}, mid data {:#x}",
+    //     mid_text, mid_rodata, mid_data
+    // );
+    unsafe {
+        assert!(!(*kernel_space.pt.get())
+            .translate_vpn_to_pte(virt_to_vpn(align_down(mid_text)))
+            .unwrap()
+            .is_writable()
+            );
+        assert!(!(*kernel_space.pt.get())
+            .translate_vpn_to_pte(virt_to_vpn(align_down(mid_rodata)))
+            .unwrap()
+            .is_writable());
+        assert!(!(*kernel_space.pt.get())
+            .translate_vpn_to_pte(virt_to_vpn(align_down(mid_data)))
+            .unwrap()
+            .is_executable());
+    }
+    info!("remap_test passed!");
 }

@@ -2,14 +2,13 @@
 
 use alloc::{string::{String, ToString}, sync::Arc, vec::Vec};
 use bitflags::bitflags;
-use spin::mutex::Mutex;
 
-use crate::{fs::{dentry::{DentryMeta, DentryMetaInner}, info::TimeSpec, inode::Inode}, sync::SpinLock};
+use crate::{fs::{dentry::{DentryMeta, DentryMetaInner}, fat32::data, info::TimeSpec, inode::Inode}, sync::SpinLock};
 
 use super::{
     fat::FatInfo, 
     fat_dentry::{FatDentry, Position}, 
-    fat_inode::{FatInode, NxtFreePos}, 
+    fat_inode::FatInode, 
     utility::{fat_to_unix_time, unix_time_to_timespec}, 
     DirEntryStatus
 };
@@ -203,15 +202,14 @@ pub fn parse_l_name(dir_pos: &[(DirEntry, Position)], fat_info: Arc<FatInfo>) ->
         let l_dir = change_to_long_dentry(dir);
         dname.push_str(&l_dir.bit_to_name());
     }
-
-    let data_clus: u32 = short_entry.fst_clus_lo as u32 + (short_entry.fst_clus_hi as u32 ) << 16;
+    println!("The dname is {:?}", dname);
+    let data_clus: u32 = short_entry.fst_clus_lo as u32 | (short_entry.fst_clus_hi as u32 ) << 16;
     let pos =  Position {
         self_cluster: s_dir_pos.1.self_cluster,
         self_sector: s_dir_pos.1.self_sector,
         offset: s_dir_pos.1.offset,
         data_cluster: data_clus as usize,
     };
-    
     let inode = Arc::new(FatInode::new_from_entry(&short_entry, pos, fat_info.clone()));
 
     FatDentry {

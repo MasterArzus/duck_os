@@ -39,13 +39,19 @@ pub struct FileMetaInner {
 }
 
 pub trait File: Send + Sync {
-    fn metadata(&self) -> &FileMeta;
+    fn metadata(&self) -> &FileMeta {
+        todo!()
+    }
 
-    fn read(&self, buf: &mut [u8], flags: OpenFlags);
-    fn write(&self, buf: &[u8], flags: OpenFlags);
+    fn read(&self, buf: &mut [u8], flags: OpenFlags) -> Option<usize>;
+    fn write(&self, buf: &[u8], flags: OpenFlags) -> Option<usize>;
 
-    fn trucate(&self, size: usize);
-    fn seek(&self, seek: SeekFrom);
+    fn trucate(&self, size: usize) {
+        todo!();
+    }
+    fn seek(&self, seek: SeekFrom) {
+        todo!();
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

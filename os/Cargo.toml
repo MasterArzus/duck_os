@@ -8,14 +8,21 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
-buddy_system_allocator = "0.6"
+buddy_system_allocator = "0.9.1"
 bitmap-allocator = {path = "../dependency/bitmap-allocator"}
-bitflags = "1.2.1"
+bitflags = "2.5.0"
 spin = { version = "0.9.8", features = ["mutex"] } 
 riscv = { git = "https://github.com/rcore-os/riscv", features = ["inline-asm"] }
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 hashbrown = "0.14"
 xmas-elf = "0.7.0"
+virtio-drivers = "0.6.0"
 
 [profile.release]
 debug = true
+
+[features]
+default = ["qemu"]
+
+qemu = []
+multi_hart = []

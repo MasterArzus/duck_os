@@ -1,7 +1,7 @@
 //! fat32文件系统对 VFS Inode 的具体实现
 //! 
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
 
 use crate::{
@@ -45,6 +45,10 @@ impl Inode for FatInode {
     
     fn write(&self, offset: usize, buf: &mut [u8]) {
         self.fat_file.lock().write(buf, offset, self.pos);
+    }
+
+    fn read_all(&self) -> Vec<u8> {
+        self.fat_file.lock().read_all()
     }
 }
 

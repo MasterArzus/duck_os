@@ -51,6 +51,7 @@ pub enum VmaType {
     Mmap,
     UserHeap,
     PhysFrame,
+    Mmio,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -188,19 +189,22 @@ impl VirtMemoryAddr {
 
     // Function: 向物理页帧中写入数据
     // TODO: 这里可以直接找物理地址空间中的页，而不是去找页表！
+    // offset: 页表中的某个位置
     pub fn copy_data(&self, data: &[u8], offset: usize, pt: &mut PageTable) {
         let mut start = 0usize;
         let mut offset = offset;
         let mut current_va = self.start_vaddr;
         let max_len = data.len();
         loop {
-            let src = &data[start..max_len.min(start + PAGE_SIZE - offset)];
+            let end = max_len.min(start + PAGE_SIZE - offset);
+            let src = &data[start..end];
+            assert!(offset + src.len() <= PAGE_SIZE);
             let dst = &mut byte_array(
                 ppn_to_phys(pt
                     .find_pte(current_va)
                     .unwrap()
                     .ppn())
-            )[offset..PAGE_SIZE - offset];
+            )[offset..offset + src.len()];
             dst.fill(0);
             dst.copy_from_slice(src);
             start += PAGE_SIZE - offset;

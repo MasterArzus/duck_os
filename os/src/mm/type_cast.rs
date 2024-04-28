@@ -3,6 +3,7 @@
 use bitflags::bitflags;
 
 bitflags! {
+    #[derive(Clone, Copy)]
     pub struct MapPermission: u8 {
         const R = 1 << 0;
         const W = 1 << 1;
@@ -35,6 +36,7 @@ bitflags! {
 
 // 0 ~ 9 V:0, R:1, W:2, X:3, U:4, G:5, A:6, D:7, RSW:8~9
 bitflags! {
+    #[derive(Clone, Copy)]
     pub struct PTEFlags: u16 {
         const V = 1 << 0;
         const R = 1 << 1;
@@ -52,6 +54,7 @@ bitflags! {
 // TODO: 还有就是一个bug：from_bit(0) != empty()
 //！
 bitflags! {
+    #[derive(Clone, Copy)]
     pub struct PagePermission: u8 {
         const R = 1 << 1;
         const W = 1 << 2;

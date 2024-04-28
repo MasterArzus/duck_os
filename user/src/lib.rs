@@ -1,6 +1,3 @@
-fn main() {
-    println!("Hello, world!");
-}
 #![no_std]
 #![feature(linkage)]
 #![feature(panic_info_message)]
@@ -32,7 +29,7 @@ const USER_HEAP_SIZE: usize = 0x32000;
 static mut HEAP_SPACE: [u8; USER_HEAP_SIZE] = [0; USER_HEAP_SIZE];
 
 #[global_allocator]
-static HEAP: LockedHeap = LockedHeap::empty();
+static HEAP: LockedHeap<32> = LockedHeap::<32>::empty();
 
 #[alloc_error_handler]
 pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
@@ -107,11 +104,11 @@ pub fn dup(fd: usize) -> isize {
     sys_dup(fd)
 }
 pub fn dup3(oldfd: usize, newfd: usize, flags: OpenFlags) -> isize {
-    sys_dup3(oldfd, newfd, flags.bits)
+    sys_dup3(oldfd, newfd, flags.bits())
 }
 pub fn openat(path: &str, flags: OpenFlags) -> isize {
     // TODO: change to the version that has `mode` arg
-    sys_openat(AT_FDCWD as usize, path, flags.bits, 0)
+    sys_openat(AT_FDCWD as usize, path, flags.bits(), 0)
 }
 pub fn read(fd: usize, buf: &mut [u8]) -> isize {
     sys_read(fd, buf)

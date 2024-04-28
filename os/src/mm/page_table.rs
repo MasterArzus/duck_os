@@ -14,13 +14,15 @@
 use core::arch::asm;
 use alloc::vec::Vec;
 use alloc::vec;
-use riscv::register::satp::{self, Satp};
+use riscv::register::satp::{self};
+
+use crate::config::mm::KERNEL_PTE_POS;
 
 use super::{
-    address::{ppn_to_phys, pte_array, vaddr_offset, vaddr_to_pte_vpn, virt_to_vpn, vpn_to_virt, PhysAddr, VirtAddr}, 
+    address::{phys_to_ppn, ppn_to_phys, pte_array, vaddr_offset, vaddr_to_pte_vpn, virt_to_vpn, vpn_to_virt, PhysAddr, VirtAddr}, 
     allocator::frame::{alloc_frame, FrameTracker}, 
     memory_set::mem_set::KERNEL_SPACE, 
-    type_cast::{PTEFlags, PagePermission, MapPermission}
+    type_cast::PTEFlags,
 };
 
 #[derive(Clone, Copy)]
@@ -117,8 +119,12 @@ impl PageTable {
         };
         let user_pte_array = pte_array(ppn_to_phys(frame.ppn));
         let kernel_pte_array = pte_array(kernel_root_paddr);
-        (*user_pte_array)[258] = (*kernel_pte_array)[258];
-        PageTable { root_paddr: frame.ppn, frames: vec![frame] }
+        (*user_pte_array)[KERNEL_PTE_POS] = (*kernel_pte_array)[KERNEL_PTE_POS];
+        PageTable { root_paddr: ppn_to_phys(frame.ppn), frames: vec![frame] }
+    }
+
+    pub fn root_ppn(&self) -> usize {
+        phys_to_ppn(self.root_paddr)
     }
 
     pub fn root_paddr(&self) -> usize {
@@ -127,14 +133,14 @@ impl PageTable {
 
     /// page table token
     pub fn token(&self) -> usize {
-        8usize << 60 | self.root_paddr
+        8usize << 60 | self.root_ppn()
     }
 
     /// activate page_table
     pub fn activate(&self) {
         // TODO: 不知道有没有逻辑问题？
-        let old_satp = satp::read().ppn() << 12;
-        if old_satp != self.root_paddr {
+        let old_satp = satp::read().ppn();
+        if old_satp != self.root_ppn() {
             let satp = self.token();
             unsafe {
                 satp::write(satp);
@@ -148,7 +154,7 @@ impl PageTable {
         let idx: (usize, usize, usize) = vaddr_to_pte_vpn(vaddr);
         let idx_array: [usize; 3] = [idx.0, idx.1, idx.2];
         let mut pa = self.root_paddr;
-        for i in 0..2 {
+        for i in 0..3 {
             let pte = &mut pte_array(pa)[idx_array[i]];
             if i == 2 {
                 return pte;
@@ -158,16 +164,16 @@ impl PageTable {
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);        
             }
-            pa = pte.ppn()
+            pa = ppn_to_phys(pte.ppn());
         }
         unreachable!();
     }
-
+    // 找页表项 如果没有，则返回None
     pub fn find_pte(&self, vaddr: VirtAddr) -> Option<&mut PageTableEntry> {
         let idx: (usize, usize, usize) = vaddr_to_pte_vpn(vaddr);
         let idx_array: [usize; 3] = [idx.0, idx.1, idx.2];
         let mut pa = self.root_paddr;
-        for i in 0..2 {
+        for i in 0..3 {
             let pte = &mut pte_array(pa)[idx_array[i]];
             if !pte.is_valid() {
                 return None;      
@@ -175,7 +181,8 @@ impl PageTable {
             if i == 2 {
                 return Some(pte);
             }
-            pa = pte.ppn()
+            
+            pa = ppn_to_phys(pte.ppn());
         }
         unreachable!();
     }
@@ -184,7 +191,7 @@ impl PageTable {
     pub fn map_one(&mut self, vpn: usize, ppn: usize, flags: PTEFlags) {
         let pte = self.find_pte_create(vpn_to_virt(vpn));
         if pte.is_valid() {
-            todo!();
+            panic!("The corresponding pte is not valid.");
         }
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::A | PTEFlags::D | PTEFlags::V);
     }
@@ -197,7 +204,7 @@ impl PageTable {
     }
 
     /// 由vpn查找pte
-    pub fn translate_vpn(&self, vpn: usize) -> Option<PageTableEntry> {
+    pub fn translate_vpn_to_pte(&self, vpn: usize) -> Option<PageTableEntry> {
         if let Some(pte) = self.find_pte(vpn_to_virt(vpn)) {
             Some(*pte)
         } else {
@@ -206,19 +213,19 @@ impl PageTable {
     }
 
     /// 由va查找pa
-    pub fn translate_va(&self, vaddr: VirtAddr) -> Option<PhysAddr> {
+    pub fn translate_va_to_pa(&self, vaddr: VirtAddr) -> Option<PhysAddr> {
         let vpn = virt_to_vpn(vaddr);
         let offset = vaddr_offset(vaddr);
-        if let Some(pte) = self.translate_vpn(vpn) {
+        if let Some(pte) = self.translate_vpn_to_pte(vpn) {
             assert!(pte.is_valid());
-            Some(pte.ppn() + offset)
+            Some(ppn_to_phys(pte.ppn()) + offset)
         } else {
-            todo!()
+            panic!("The va is not mapped! No pte");
         }
     }
 
     pub fn modify_flags(&self, vpn: usize, flags: PTEFlags) {
-        let mut pte = self.translate_vpn(vpn).unwrap();
+        let mut pte = self.translate_vpn_to_pte(vpn).unwrap();
         pte.set_flags(flags);
     }
 

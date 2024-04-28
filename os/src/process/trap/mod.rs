@@ -1,4 +1,6 @@
-use riscv::register::{scause::{self, Trap, Exception}, sstatus, stval, stvec};
+use core::arch::global_asm;
+
+use riscv::register::{mtvec, scause::{self, Exception, Trap}, sstatus, stval, stvec};
 
 use crate::syscall::syscall;
 
@@ -6,13 +8,15 @@ use self::context::TrapContext;
 
 pub mod context;
 
+global_asm!(include_str!("trap.S"));
 
 pub fn init_stvec() {
     extern "C" {
         fn __alltraps();
     }
     unsafe {
-        stvec::write(__alltraps as usize, stvec::TrapMode::Direct);
+        // 目前使用大表里面写分支
+        stvec::write(__alltraps as usize, mtvec::TrapMode::Direct);
     }
 }
 
@@ -38,6 +42,9 @@ pub fn user_trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
             cx.set_register(context::Register::a0, num);
         }
         _ => {
+            println!(
+                "[kernel] encounter page fault, addr {:#x}, instruction {:#x} scause {:?}",
+            stval, 0, scause.cause());
             panic!();
         }
     }
@@ -48,7 +55,6 @@ pub fn user_trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
 pub fn kernel_trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
     let scause = scause::read();
     let stval = stval::read();
-    
     match scause.cause() {
         Trap::Exception(Exception::UserEnvCall) => {
             cx.sepc += 4;

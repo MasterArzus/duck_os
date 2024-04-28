@@ -40,7 +40,32 @@ pub fn sys_fstat() {
     4. 这一块的代码略微有点小多。
 }
 
-
-
-
 */
+
+use crate::process::hart::cpu::{get_cpu_id, get_cpu_local};
+
+use super::error::SyscallResult;
+
+pub fn sys_write(fd: usize, buf: usize, len: usize) -> SyscallResult {
+    println!("[sys_write]: fd {}, len {}", fd, len);
+    let fd_table = get_cpu_local(get_cpu_id())
+        .current_pcb()
+        .as_ref()
+        .unwrap()
+        .fd_table
+        .clone();
+    let file_info = {
+        let locked_fd_table = fd_table.lock();
+        locked_fd_table.fd_table.get(&fd).cloned()
+    };
+    if file_info.is_none() {
+        panic!("The fd {} has no file", fd);
+    } else {
+        let file_info_unwrap = file_info.unwrap();
+    // if file_info_unwrap.flags
+        let flags = file_info_unwrap.flags.clone();
+        let buf = unsafe { core::slice::from_raw_parts(buf as *const u8, len)};
+        let ret = file_info_unwrap.file.write(buf, flags);
+        Ok(ret.unwrap())
+    }
+}

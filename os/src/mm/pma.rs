@@ -20,7 +20,7 @@
 use alloc::{collections::BTreeMap, sync::{Arc, Weak}};
 use spin::Mutex;
 
-use crate::{config::{fs::SECTOR_SIZE, mm::PAGE_SIZE}, fs::inode::Inode};
+use crate::{config::{fs::SECTOR_SIZE, mm::PAGE_SIZE}, fs::inode::Inode, sync::SpinLock};
 
 use super::{
     address::{align_down, byte_array, get_mut, get_ref, phys_to_ppn, ppn_to_phys, virt_to_vpn},
@@ -38,6 +38,8 @@ pub enum DataState {
 const DATA_SIZE: usize = PAGE_SIZE / SECTOR_SIZE;
 
 pub struct DiskFileInfo {
+    // TODO：名字有些误导性，这个数据结构描述的是page用来表示磁盘上文件时的信息
+    // file_offset: 在以页面为单位下，文件offset所在页面的页面初始位置
     inode: Weak<dyn Inode>,
     file_offset: usize,
     data_state: [DataState; DATA_SIZE],
@@ -61,6 +63,9 @@ pub struct Page {
     pub frame: FrameTracker,
     pub permission: PagePermission,
     pub disk_file: Option<Mutex<DiskFileInfo>>,
+    // page的计数原本是通过Arc来管理，但是因为page在很多cache中也被引用了。所以Arc引用值是不准确的。
+    // 而在cow机制中，需要使用到这个计数的值，所以这里需要有这么一个值，同时要上锁。
+    pub cow_count: SpinLock<usize>,
 }
 
 impl Page {
@@ -73,6 +78,7 @@ impl Page {
             frame: alloc_frame().unwrap(),
             permission: per,
             disk_file: None,
+            cow_count: SpinLock::new(0),
         }
     }
 
@@ -81,6 +87,7 @@ impl Page {
             frame: alloc_frame().unwrap(),
             permission: per,
             disk_file: Some(Mutex::new(DiskFileInfo::new(inode, offset))),
+            cow_count: SpinLock::new(0),
         }
     }
 
@@ -92,6 +99,7 @@ impl Page {
             frame: new_frame,
             permission,
             disk_file: None,
+            cow_count: SpinLock::new(0),
         }
     }
     
@@ -108,26 +116,34 @@ impl Page {
     }
 
     fn to_sec_idx(page_offset: usize) -> usize {
-        page_offset / PAGE_SIZE 
+        page_offset / SECTOR_SIZE 
     }
     // 一个页面的读写
     // page_offset: 为页面中的offset值
+    // 如果对应磁盘上的文件时：内存中的一个页相当于磁盘上的8个块
     pub fn read(&self, page_offset: usize, buf: &mut [u8]) {
-        if page_offset > PAGE_SIZE {
+        if page_offset >= PAGE_SIZE {
             panic!()
         }
         let len: usize = buf.len().min(PAGE_SIZE - page_offset);
-        for idx in Self::to_sec_idx(page_offset)..DATA_SIZE {
-            let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
-            if disk_file_lock.data_state[idx] == DataState::Init {
-                disk_file_lock.inode.upgrade().unwrap().read(
-                    disk_file_lock.file_offset + idx * SECTOR_SIZE,
-                    &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
-                );
-                disk_file_lock.change_data_state(DataState::Sync, idx);
+        // 如果是磁盘上的文件
+        if self.disk_file.is_some() {
+            let end_offset = (page_offset + buf.len()).min(PAGE_SIZE);
+            for idx in Self::to_sec_idx(page_offset)..Self::to_sec_idx(end_offset - 1 + SECTOR_SIZE) {
+                let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
+                if disk_file_lock.data_state[idx] == DataState::Init {
+                    // offset：文件的位置 = 页开始的位置 + 页中某个块的开始位置
+                    // buf：读到以块为单位的页其中某个块上，大小为块大小。
+                    disk_file_lock.inode.upgrade().unwrap().read(
+                        disk_file_lock.file_offset + idx * SECTOR_SIZE,
+                        &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
+                    );
+                    disk_file_lock.change_data_state(DataState::Sync, idx);
+                }
+                drop(disk_file_lock);
             }
-            drop(disk_file_lock);
         }
+        // TODO： 想一想内存中page的使用方法
         buf.copy_from_slice(&self.page_byte_array()[page_offset..page_offset+len]);
     }
 
@@ -138,14 +154,21 @@ impl Page {
         let len: usize = buf.len().min(PAGE_SIZE - page_offset);
         let start = page_offset;
         let end = page_offset + len;
-        for idx in Self::to_sec_idx(page_offset)..DATA_SIZE {
-            let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
-            if disk_file_lock.data_state[idx] == DataState::Init {
-                disk_file_lock.inode.upgrade().unwrap().read(
-                    disk_file_lock.file_offset + idx * SECTOR_SIZE,
-                    &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
-                );
-                disk_file_lock.change_data_state(DataState::Dirty, idx);
+        // 如果是磁盘上的文件
+        if self.disk_file.is_some() {
+            let end_offset = (page_offset + buf.len()).min(PAGE_SIZE);
+            for idx in Self::to_sec_idx(page_offset)..Self::to_sec_idx(end_offset - 1 + SECTOR_SIZE) {
+                let mut disk_file_lock = self.disk_file.as_ref().unwrap().lock();
+                if disk_file_lock.data_state[idx] == DataState::Init {
+                    disk_file_lock.inode.upgrade().unwrap().read(
+                        disk_file_lock.file_offset + idx * SECTOR_SIZE,
+                        &mut self.page_byte_array()[idx*SECTOR_SIZE..(idx+1)*SECTOR_SIZE],
+                    );
+                    disk_file_lock.change_data_state(DataState::Dirty, idx);
+                } else if disk_file_lock.data_state[idx] == DataState::Sync {
+                    disk_file_lock.change_data_state(DataState::Dirty, idx);
+                }
+                drop(disk_file_lock);
             }
         }
         // TODO: 小心copy_from_slice这个函数，不会检查两个切片的大小，我这里没有检查，区间可能会爆掉！
@@ -257,7 +280,7 @@ impl PhysMemoryAddr {
         finished
     }
 
-    pub fn read_pma_page(&mut self, offset: usize, dst:&mut [u8]) -> usize {
+    pub fn read_pma_page(&mut self, offset: usize, dst: &mut [u8]) -> usize {
         self.read_write_pma_page(offset, dst.len(), |finished: usize, src: &mut [u8]|{
             dst[finished..finished + src.len()].copy_from_slice(src)
         })

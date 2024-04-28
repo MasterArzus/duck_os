@@ -6,7 +6,7 @@ use alloc::{sync::{Arc, Weak}, vec::Vec};
 
 use crate::{config::{fs::SECTOR_SIZE, mm::PAGE_SIZE}, fs::{file::{File, FileMeta, SeekFrom}, info::{OpenFlags, TimeSpec}}};
 
-use super::{block_cache::get_block_cache, fat::{alloc_cluster, find_all_cluster, free_cluster, FatInfo}, fat_dentry::Position, fat_inode::NxtFreePos, utility::cluster_to_sector};
+use super::{block_cache::get_block_cache, data, fat::{alloc_cluster, find_all_cluster, free_cluster, FatInfo}, fat_dentry::Position, fat_inode::NxtFreePos, utility::cluster_to_sector};
 
 // TODO：这里有一个问题要仔细想一想？
 /*
@@ -35,7 +35,7 @@ impl FatDiskFile {
         file
     }
 
-    pub fn cal_cluster_size(&mut self, pos: Position) {
+    fn cal_cluster_size(&mut self, pos: Position) {
         let cluster = find_all_cluster(self.fat_info.clone(), pos.data_cluster);
         self.clusters.clone_from(&cluster);
         if self.size == 0 {
@@ -166,6 +166,13 @@ impl FatDiskFile {
         ed - st
     }
 
+    pub fn read_all(&mut self) -> Vec<u8> {
+        let mut data_vec = Vec::new();
+        data_vec.resize(self.size, 0);
+        self.read(&mut data_vec, 0);
+        data_vec
+    }
+
 }
 
 type Sector = [u8; SECTOR_SIZE];
@@ -211,7 +218,9 @@ impl File for FatMemFile {
     }
 
     // 将文件的offset(pos)之后的数据读入buf中
-    fn read(&self, buf: &mut [u8], _flags: OpenFlags) {
+    // offset >> PAGE_SIZE: page的索引值； 后几位：page中的offset
+    // TODO：需要修改这里的data_len
+    fn read(&self, buf: &mut [u8], _flags: OpenFlags) -> Option<usize> {
         let data_len = 0;
         let pos = self.meta.inner.lock().f_pos;
         let page_cache = Arc::clone(self.meta.page_cache.as_ref().unwrap());
@@ -243,10 +252,12 @@ impl File for FatMemFile {
         // TODO: 没搞懂这个东西的逻辑
         self.meta.f_inode.metadata().inner.lock().i_atime = TimeSpec::new();
         self.meta.inner.lock().f_pos = file_offset;
+        // TODO: 不一定是这个值，这里没有仔细思考而随意设置的一个值
+        Some(max_len)
     }
 
     // TODO: 多个进程访问一个文件的问题？
-    fn write(&self, buf: &[u8], _flags: OpenFlags) {
+    fn write(&self, buf: &[u8], _flags: OpenFlags) -> Option<usize> {
         let pos = self.meta.inner.lock().f_pos;
         let page_cache = Arc::clone(self.meta.page_cache.as_ref().unwrap());
         let inode = Arc::downgrade(&self.meta.f_inode);
@@ -282,6 +293,8 @@ impl File for FatMemFile {
         inner_lock.i_ctime = inner_lock.i_atime;
         inner_lock.i_mtime = inner_lock.i_atime;
         self.meta.inner.lock().f_pos = file_offset;
+        // TODO: 随意设置的一个值
+        Some(total_len)
     }
 }
 

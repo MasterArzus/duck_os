@@ -113,13 +113,13 @@ pub fn path_to_dentry(path: &str) -> Option<Arc<dyn Dentry>> {
         // 如果找到了前最大子串，则pa_dentry不是从根开始
         // 否则从根开始
         let mut pa_dentry = FILE_SYSTEM_MANAGER.root_dentry();
-        let mut pa_inode: Arc<dyn Inode>;
+        // let mut pa_inode: Arc<dyn Inode>;
         // if let Some(inode) = &pa_dentry.metadata().inner.lock().d_inode {
         //     pa_inode = inode.clone();
         // } else {
         //     todo!();
         // }
-        pa_inode = pa_dentry.metadata().inner.lock().d_inode.clone();
+        // pa_inode = pa_dentry.metadata().inner.lock().d_inode.clone();
         let path_vec: Vec<&str> = path
             .split('/')
             .filter(|name| *name != "" )
@@ -146,8 +146,8 @@ pub fn path_to_dentry(path: &str) -> Option<Arc<dyn Dentry>> {
                     // } else {
                     //     todo!();
                     // }
-                    pa_inode = pa_dentry.metadata().inner.lock().d_inode.clone();
-                    continue;
+                    // pa_inode = pa_dentry.metadata().inner.lock().d_inode.clone();
+                    // continue;
                 }
             else {
                 // 树上没有找到，直接返回错误
@@ -281,6 +281,21 @@ pub fn cwd_and_path(path: &str, cwd: &str) -> String {
     } else {
         todo!();
     }
+}
+
+// cwd + name ---> 绝对路径
+// Assumption： name中没有 / 且 cwd已经是 / or /xxx/yyy
+// 返回形式: /xxx/yy 或者 / 
+pub fn cwd_and_name(name: &str, cwd: &str) -> String {
+    if name.contains("/") {
+        panic!("File or directory name has /");
+    }
+    let mut cwd = cwd.to_string();
+    if !&cwd.ends_with("/") {
+        cwd.push('/');
+    }
+    cwd.push_str(name);
+    cwd
 }
 
 // 规范化路径，主要是去掉 \t \n等，还有最后一个 “/”

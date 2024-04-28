@@ -7,9 +7,13 @@
 #![feature(panic_info_message)]
 #![feature(sync_unsafe_cell)]
 
-use core::arch::global_asm;
+use core::{arch::global_asm, sync::atomic::AtomicBool};
 // use core::arch::asm
 use log::*;
+use process::hart::cpu;
+use riscv::register::sstatus;
+
+use crate::process::hart;
 
 #[macro_use]
 mod console;
@@ -25,6 +29,7 @@ pub mod utils;
 pub mod driver;
 mod syscall;
 pub mod sync;
+pub mod boards;
 
 extern crate alloc;
 extern crate bitmap_allocator;
@@ -70,22 +75,44 @@ pub fn layout() {
         sdata as usize, edata as usize
     );
     trace!(
-        "[kernel] boot_stack top=bottom={:#x}, lower_bound={:#x}",
+        "[kernel] boot_stack bottom={:#x}, top={:#x}",
         boot_stack_top as usize, boot_stack_lower as usize
     );
     trace!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
 }
 
+static FISRT_HART: AtomicBool = AtomicBool::new(true);
+
 /// the rust entry-point of os
 #[no_mangle]
 pub fn rust_main() {
-    
-    clear_bss();
-    logging::init();
-    println!("[kernel] Hello, world!");
-    layout();
+    if FISRT_HART.compare_exchange(true, false, core::sync::atomic::Ordering::SeqCst, core::sync::atomic::Ordering::SeqCst)
+        .is_ok() {
+            clear_bss();
+            logging::init();
+            layout();
+            hart::cpu::init();
+            mm::init();
+            process::trap::init_stvec();
+            driver::init_block_device();
+            unsafe {
+                sstatus::set_sum();
+                // println!("sstatus is {:x?}", sstatus::read());
+            }
+            fs::init();
+            // loop {} // 暂时放在这里，如果没有它，之后就会触发内核中断,因为离开rust_main函数之后，pc会跑到0的位置。
+            process::init_origin_task();
+            cpu::run_task();
+            #[cfg(feature = "multi_hart")]
+            hart::cpu::start_other_hart();
+            loop {}
 
-    // // Warning: 这里我们自己自动的让qemu终止!
-    // use crate::board::QEMUExit;
-    // crate::board::QEMU_EXIT_HANDLE.exit_success(); // CI autotest success
+        } else {
+            hart::cpu::init();    
+            loop {}
+        }
+    
+    
+    // Warning: 这里我们自己自动的让qemu终止!
+    // QEMU_EXIT_HANDLE.exit_success();
 }

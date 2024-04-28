@@ -1,5 +1,7 @@
 //! File System Information(FSInfo) Structure
 
+use core::fmt::Debug;
+
 use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use spin::mutex::Mutex;
 
@@ -139,5 +141,11 @@ impl FSInfo {
     // 下一个空闲的cluster number
     pub fn next_free(&mut self, new_free: usize) {
         self.FSI_Nxt_Free = new_free as u32;
+    }
+}
+
+impl Debug for FSInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!("FSInfo is [free_count:{}, next_free_cluter_num: {}]", self.FSI_Free_Count, self.FSI_Nxt_Free))
     }
 }
